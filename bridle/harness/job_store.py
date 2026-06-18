@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from bridle.domain.errors import JobNotFoundError
-from bridle.domain.events import JobEvent
+from bridle.domain.events import JobEvent, JsonValue
 from bridle.domain.jobs import JobState, JobStatus
 
 
@@ -146,7 +146,7 @@ class SQLiteJobStore:
         *,
         stage: str | None = None,
         progress: float | None = None,
-        payload: dict | None = None,
+        payload: dict[str, JsonValue] | None = None,
     ) -> JobEvent:
         self.get_job(job_id)
         sequence = self._next_sequence(job_id)

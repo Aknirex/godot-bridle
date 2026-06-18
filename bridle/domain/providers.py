@@ -30,6 +30,7 @@ class ProviderConfig(BaseModel):
 
 class ProviderHealthStatus(StrEnum):
     OK = "ok"
+    CONFIG_ERROR = "config_error"
     MISSING_KEY = "missing_key"
     AUTH_FAILED = "auth_failed"
     UNAVAILABLE = "unavailable"

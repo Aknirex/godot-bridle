@@ -75,3 +75,27 @@ async def test_orchestrator_can_cancel_before_worker_starts(tmp_path) -> None:
         if orchestrator is not None:
             await orchestrator.stop()
         store.close()
+
+
+async def test_orchestrator_masks_unexpected_exception_details(tmp_path) -> None:
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    orchestrator = None
+    try:
+        broker = JobEventBroker(store)
+        orchestrator = AsyncTaskOrchestrator(store, broker)
+        await orchestrator.start()
+
+        async def handler(context: JobContext) -> None:
+            raise RuntimeError("secret path C:/private/token.txt")
+
+        ref = await orchestrator.submit("character_gen", handler)
+        await wait_for_state(orchestrator, ref.job_id, JobState.FAILED)
+
+        status = store.get_job(ref.job_id)
+        failed_event = store.replay_events(ref.job_id)[-1]
+        assert status.safe_details == "An unexpected error occurred."
+        assert failed_event.payload["safe_details"] == "An unexpected error occurred."
+    finally:
+        if orchestrator is not None:
+            await orchestrator.stop()
+        store.close()

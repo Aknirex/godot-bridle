@@ -23,6 +23,13 @@ class LiteLlmProvider:
 
     async def test_connection(self) -> ProviderHealth:
         start = time.perf_counter()
+        if self.config.model is None:
+            return ProviderHealth(
+                provider_id=self.config.provider_id,
+                status=ProviderHealthStatus.CONFIG_ERROR,
+                safe_details=f"Provider {self.config.provider_id!r} has no model configured.",
+            )
+
         try:
             await self.chat(
                 LlmChatRequest(

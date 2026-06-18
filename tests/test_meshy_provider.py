@@ -13,6 +13,14 @@ from bridle.domain.providers import (
 from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
 
 
+class RecordingAsyncClient:
+    def __init__(self) -> None:
+        self.close_count = 0
+
+    async def aclose(self) -> None:
+        self.close_count += 1
+
+
 async def test_mock_meshy_provider_completes_text_to_3d_flow() -> None:
     provider = MockMeshyProvider(
         ProviderConfig(provider_id="meshy", kind=ProviderKind.ASSET)
@@ -53,3 +61,28 @@ async def test_meshy_provider_maps_key_health_without_network() -> None:
     health = await provider.test_connection()
 
     assert health.status == "missing_key"
+
+
+async def test_meshy_provider_reuses_owned_client_until_closed() -> None:
+    provider = MeshyProvider(
+        ProviderConfig(provider_id="meshy", kind=ProviderKind.ASSET),
+    )
+
+    first = provider._ensure_client()
+    second = provider._ensure_client()
+
+    assert first is second
+    await provider.close()
+    assert provider._owned_client is None
+
+
+async def test_meshy_provider_does_not_close_injected_client() -> None:
+    client = RecordingAsyncClient()
+    provider = MeshyProvider(
+        ProviderConfig(provider_id="meshy", kind=ProviderKind.ASSET),
+        client=client,  # type: ignore[arg-type]
+    )
+
+    assert provider._ensure_client() is client
+    await provider.close()
+    assert client.close_count == 0

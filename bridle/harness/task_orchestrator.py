@@ -129,18 +129,19 @@ class AsyncTaskOrchestrator:
                 payload={"error_code": error.code.value, "safe_details": error.safe_details},
             )
             return
-        except Exception as error:
+        except Exception:
+            safe_details = "An unexpected error occurred."
             self.store.update_job(
                 queued.job_id,
                 JobState.FAILED,
                 error_code="internal_error",
-                safe_details=str(error),
+                safe_details=safe_details,
             )
             await self.events.emit(
                 queued.job_id,
                 "job.failed",
                 "Job failed",
-                payload={"error_code": "internal_error", "safe_details": str(error)},
+                payload={"error_code": "internal_error", "safe_details": safe_details},
             )
             return
 

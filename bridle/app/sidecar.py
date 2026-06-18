@@ -13,7 +13,6 @@ from pydantic import BaseModel
 
 from bridle.app.services import BridleAppService
 from bridle.domain.errors import BridleError, BridleErrorCode
-from bridle.domain.events import JobEvent
 
 PROTOCOL_VERSION = "2026-06-18"
 JSONRPC_VERSION = "2.0"
@@ -174,8 +173,6 @@ def _json_rpc_code_for(code: BridleErrorCode) -> int:
 
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, JobEvent):
         return value.model_dump(mode="json")
     return value
 

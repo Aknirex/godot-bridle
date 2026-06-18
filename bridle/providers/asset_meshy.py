@@ -31,6 +31,18 @@ class MeshyProvider:
         self.config = config
         self.key_resolver = key_resolver or KeyResolver()
         self._client = client
+        self._owned_client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> MeshyProvider:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        if self._owned_client is not None:
+            await self._owned_client.aclose()
+            self._owned_client = None
 
     async def test_connection(self) -> ProviderHealth:
         start = time.perf_counter()
@@ -98,8 +110,7 @@ class MeshyProvider:
         json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         base_url = self.config.base_url or DEFAULT_MESHY_BASE_URL
-        client = self._client or httpx.AsyncClient(timeout=30)
-        close_client = self._client is None
+        client = self._ensure_client()
         try:
             response = await client.request(
                 method,
@@ -119,9 +130,13 @@ class MeshyProvider:
             raise ProviderError(f"Meshy request failed with HTTP {status}.") from error
         except httpx.HTTPError as error:
             raise ProviderError("Meshy request failed.") from error
-        finally:
-            if close_client:
-                await client.aclose()
+
+    def _ensure_client(self) -> httpx.AsyncClient:
+        if self._client is not None:
+            return self._client
+        if self._owned_client is None:
+            self._owned_client = httpx.AsyncClient(timeout=30)
+        return self._owned_client
 
 
 class MockMeshyProvider:
