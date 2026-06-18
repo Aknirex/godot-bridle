@@ -25,6 +25,16 @@ class ConfigError(BridleError):
         super().__init__(BridleErrorCode.CONFIG_ERROR, safe_details)
 
 
+class AuthError(BridleError):
+    def __init__(self, safe_details: str) -> None:
+        super().__init__(BridleErrorCode.AUTH_ERROR, safe_details)
+
+
+class ProviderError(BridleError):
+    def __init__(self, safe_details: str) -> None:
+        super().__init__(BridleErrorCode.PROVIDER_ERROR, safe_details)
+
+
 class ProviderCapabilityError(BridleError):
     def __init__(self, safe_details: str) -> None:
         super().__init__(BridleErrorCode.PROVIDER_CAPABILITY_ERROR, safe_details)

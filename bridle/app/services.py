@@ -4,10 +4,20 @@ import asyncio
 from pathlib import Path
 
 from bridle import __version__
+from bridle.config.key_resolver import KeyResolver
+from bridle.domain.capabilities import ProviderCapability
 from bridle.domain.jobs import JobRef, JobStatus
+from bridle.domain.providers import (
+    ProviderConfig,
+    ProviderHealth,
+    ProviderHealthStatus,
+    ProviderKind,
+)
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
+from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
+from bridle.providers.llm_litellm import LiteLlmProvider
 
 
 class BridleAppService:
@@ -16,10 +26,14 @@ class BridleAppService:
         store: SQLiteJobStore,
         events: JobEventBroker,
         orchestrator: AsyncTaskOrchestrator,
+        providers: list[ProviderConfig] | None = None,
+        key_resolver: KeyResolver | None = None,
     ) -> None:
         self.store = store
         self.events = events
         self.orchestrator = orchestrator
+        self.providers = providers if providers is not None else default_provider_configs()
+        self.key_resolver = key_resolver or KeyResolver()
 
     @classmethod
     def create(cls, db_path: Path) -> BridleAppService:
@@ -42,6 +56,23 @@ class BridleAppService:
             "status": "ok",
         }
 
+    async def list_providers(self) -> list[dict]:
+        return [provider.model_dump(mode="json") for provider in self.providers]
+
+    async def test_provider(self, provider_id: str) -> ProviderHealth:
+        provider = self._provider_by_id(provider_id)
+        if provider.kind == ProviderKind.LLM:
+            return await LiteLlmProvider(provider, self.key_resolver).test_connection()
+        if provider.kind == ProviderKind.ASSET and provider.backend == "mock_meshy":
+            return await MockMeshyProvider(provider).test_connection()
+        if provider.kind == ProviderKind.ASSET and provider.backend == "meshy":
+            return await MeshyProvider(provider, self.key_resolver).test_connection()
+        return ProviderHealth(
+            provider_id=provider.provider_id,
+            status=ProviderHealthStatus.UNKNOWN,
+            safe_details=f"No health adapter for backend {provider.backend!r}.",
+        )
+
     async def submit_workflow(self, params: dict) -> JobRef:
         workflow_id = str(params.get("workflow_id", "mock.sleep"))
         duration_ms = int(params.get("duration_ms", 10))
@@ -58,3 +89,30 @@ class BridleAppService:
 
     async def cancel_job(self, job_id: str) -> JobStatus:
         return self.orchestrator.cancel_job(job_id)
+
+    def _provider_by_id(self, provider_id: str) -> ProviderConfig:
+        for provider in self.providers:
+            if provider.provider_id == provider_id:
+                return provider
+        return ProviderConfig(provider_id=provider_id, kind=ProviderKind.GATEWAY)
+
+
+def default_provider_configs() -> list[ProviderConfig]:
+    return [
+        ProviderConfig(
+            provider_id="deepseek",
+            kind=ProviderKind.LLM,
+            backend="litellm",
+            model="deepseek/deepseek-chat",
+            api_key_env="DEEPSEEK_API_KEY",
+            capabilities=[ProviderCapability.LLM_CHAT, ProviderCapability.LLM_STREAM],
+            default_for=[ProviderCapability.LLM_CHAT, ProviderCapability.LLM_STREAM],
+        ),
+        ProviderConfig(
+            provider_id="meshy_mock",
+            kind=ProviderKind.ASSET,
+            backend="mock_meshy",
+            capabilities=[ProviderCapability.MODEL3D_TEXT_TO_3D],
+            default_for=[ProviderCapability.MODEL3D_TEXT_TO_3D],
+        ),
+    ]

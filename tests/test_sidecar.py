@@ -61,6 +61,23 @@ async def test_sidecar_health_request(tmp_path) -> None:
         await sidecar.stop()
 
 
+async def test_sidecar_lists_and_tests_providers(tmp_path) -> None:
+    sidecar, written = await make_sidecar(tmp_path)
+    try:
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":1,"method":"list_providers","params":{}}'
+        )
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":2,"method":"test_provider",'
+            '"params":{"provider_id":"meshy_mock"}}'
+        )
+
+        assert written[-2]["result"][0]["provider_id"] == "deepseek"
+        assert written[-1]["result"]["status"] == "ok"
+    finally:
+        await sidecar.stop()
+
+
 async def test_sidecar_submit_workflow_and_stream_events(tmp_path) -> None:
     sidecar, written = await make_sidecar(tmp_path)
     try:

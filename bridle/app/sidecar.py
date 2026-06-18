@@ -89,6 +89,11 @@ class JsonRpcSidecar:
         try:
             if method == "health":
                 return await self.service.health()
+            if method == "list_providers":
+                return await self.service.list_providers()
+            if method == "test_provider":
+                provider_id = _required_str(params, "provider_id")
+                return _to_jsonable(await self.service.test_provider(provider_id))
             if method == "submit_workflow":
                 return _to_jsonable(await self.service.submit_workflow(params))
             if method == "get_job_status":
