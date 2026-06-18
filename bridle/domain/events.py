@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TypeAlias
 
 from pydantic import BaseModel, Field
+from typing_extensions import TypeAliasType
 
-JsonValue: TypeAlias = (
-    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+JsonValue = TypeAliasType(
+    "JsonValue",
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"],
 )
 
 
