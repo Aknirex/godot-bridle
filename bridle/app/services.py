@@ -7,12 +7,14 @@ from bridle import __version__
 from bridle.config.key_resolver import KeyResolver
 from bridle.domain.capabilities import ProviderCapability
 from bridle.domain.jobs import JobRef, JobStatus
+from bridle.domain.projects import ProjectSummary
 from bridle.domain.providers import (
     ProviderConfig,
     ProviderHealth,
     ProviderHealthStatus,
     ProviderKind,
 )
+from bridle.godot.project import detect_project
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
@@ -55,6 +57,9 @@ class BridleAppService:
             "version": __version__,
             "status": "ok",
         }
+
+    async def open_project(self, path: str) -> ProjectSummary:
+        return detect_project(Path(path))
 
     async def list_providers(self) -> list[dict]:
         return [provider.model_dump(mode="json") for provider in self.providers]

@@ -61,6 +61,20 @@ async def test_sidecar_health_request(tmp_path) -> None:
         await sidecar.stop()
 
 
+async def test_sidecar_opens_project(tmp_path) -> None:
+    (tmp_path / "project.godot").write_text('config/name="Demo"\n', encoding="utf-8")
+    sidecar, written = await make_sidecar(tmp_path / "db")
+    try:
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":1,"method":"open_project",'
+            f'"params":{{"path":"{tmp_path.as_posix()}"}}}}'
+        )
+
+        assert written[-1]["result"]["project_name"] == "Demo"
+    finally:
+        await sidecar.stop()
+
+
 async def test_sidecar_lists_and_tests_providers(tmp_path) -> None:
     sidecar, written = await make_sidecar(tmp_path)
     try:

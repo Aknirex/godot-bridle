@@ -89,6 +89,9 @@ class JsonRpcSidecar:
         try:
             if method == "health":
                 return await self.service.health()
+            if method == "open_project":
+                path = _required_str(params, "path")
+                return _to_jsonable(await self.service.open_project(path))
             if method == "list_providers":
                 return await self.service.list_providers()
             if method == "test_provider":

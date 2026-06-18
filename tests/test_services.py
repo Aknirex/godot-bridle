@@ -18,6 +18,19 @@ async def test_service_lists_default_providers(tmp_path) -> None:
         store.close()
 
 
+async def test_service_opens_godot_project(tmp_path) -> None:
+    (tmp_path / "project.godot").write_text('config/name="Demo"\n', encoding="utf-8")
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    events = JobEventBroker(store)
+    service = BridleAppService(store, events, AsyncTaskOrchestrator(store, events))
+    try:
+        summary = await service.open_project(str(tmp_path))
+
+        assert summary.project_name == "Demo"
+    finally:
+        store.close()
+
+
 async def test_service_tests_default_mock_meshy(tmp_path) -> None:
     store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
     events = JobEventBroker(store)
