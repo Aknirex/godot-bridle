@@ -11,3 +11,9 @@ uv sync --extra dev
 uv run pytest
 uv run bridle health
 ```
+
+The desktop shell will talk to the Python core through the stdio JSON-RPC sidecar:
+
+```powershell
+uv run bridle sidecar
+```
