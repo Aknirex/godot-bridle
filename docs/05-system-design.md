@@ -1,6 +1,6 @@
 # godot-bridle 概要设计
 
-> **文档版本**：v0.1
+> **文档版本**：v0.2
 > **创建日期**：2026-06-18
 > **阶段**：概要设计
 > **依赖文档**：
@@ -97,12 +97,34 @@ Godot Integration Layer
 └──────────────────────┘
 ```
 
-### 3.2 通信原则
+### 3.2 通信协议
 
-- Tauri command 只能做短生命周期操作。
-- 桌面提交长任务时调用 `submit_job()`，立即拿到 `job_id`。
-- 桌面通过事件订阅或轮询查询 job 状态。
-- Python sidecar 内部负责 Provider 请求、轮询、下载、Godot CLI 和文件写入。
+MVP 采用 **stdio JSON-RPC over JSON Lines** 作为 Tauri 与 Python sidecar 的主通信协议。
+
+选择理由：
+
+- Tauri sidecar 模型天然适合 stdio 通信；
+- 不需要启动本地 HTTP/WebSocket server，避免端口冲突、防火墙提示和本机服务暴露面；
+- JSON-RPC 能表达 request/response/error，JSON Lines 能承载事件 notification；
+- 长任务只返回 `job_id`，事件通过 notification 推送，符合非阻塞要求。
+
+备选方案：
+
+- localhost WebSocket/HTTP 仅作为备选事件通道；
+- 若启用 localhost，必须绑定 `127.0.0.1`，使用随机端口和一次性 token；
+- 不允许把 WebUI 或远程 HTTP API 作为 MVP 产品形态。
+
+协议约束：
+
+- 每条消息为一行 UTF-8 JSON；
+- request 使用 JSON-RPC 2.0 风格：`jsonrpc`、`id`、`method`、`params`；
+- response 必须包含同一 `id`；
+- job 事件通过 notification 推送：无 `id`，`method = "job.event"`；
+- 所有消息必须带 `protocol_version`；
+- sidecar 启动后先发送 `sidecar.ready`；
+- Tauri command 只能做短生命周期操作；
+- 桌面提交长任务时调用 `submit_job()`，立即拿到 `job_id`；
+- Python sidecar 内部负责 Provider 请求、轮询、下载、Godot CLI 和文件写入；
 - CLI 与桌面复用同一 `bridle.app.services`，不能另写业务路径。
 
 ---
@@ -167,7 +189,7 @@ class BridleAppService:
 
 MVP 实现：
 
-- `asyncio.Queue(maxsize=N)`；
+- `asyncio.Queue(maxsize=max(4, os.cpu_count() or 1))`；
 - 固定 worker pool；
 - 每个 job 包含 workflow name、payload、project、stage、attempt；
 - I/O 任务用 async；
@@ -207,6 +229,17 @@ MVP 角色生成工作流阶段：
 11. `generate_sample_scene_or_script`
 12. `finalize_asset_record`
 
+阶段 7-12 的 I/O 契约：
+
+| 阶段 | 输入 | 输出 | 落盘位置 |
+|---|---|---|---|
+| `download_assets` | Provider 完成任务响应、文件 URL、`asset_id`、项目输出目录 | `DownloadedAssetBundle`：GLB、本地纹理路径、原始 provider metadata | `res://bridle/generated/<asset_id>/source/` |
+| `inspect_glb` | `DownloadedAssetBundle.model_glb_path` | `GlbInspectionReport`：可解析性、尺寸、材质槽、贴图引用、warnings | `res://bridle/generated/<asset_id>/bridle_asset.json` |
+| `prepare_godot_files` | `DownloadedAssetBundle`、`GlbInspectionReport`、项目配置 | `PreparedGodotAsset`：规范化目录、材质资源计划、示例资源计划 | `res://bridle/generated/<asset_id>/godot/` |
+| `run_godot_import_check` | `PreparedGodotAsset`、Godot executable、项目路径 | `ImportResult`：exit code、stdout/stderr 摘要、导入产物检查结果 | SQLite `job_events` + `bridle_asset.json` |
+| `generate_sample_scene_or_script` | `PreparedGodotAsset`、`ImportResult` | `SampleResourceResult`：`preview_scene.tscn`、`use_asset.gd` | `res://bridle/generated/<asset_id>/godot/` |
+| `finalize_asset_record` | 所有前序结果 | `GeneratedAssetRecord`：资产索引、状态、文件清单、provider metadata 摘要 | SQLite `generated_assets` + `bridle_asset.json` |
+
 ### 4.5 `bridle.harness.event_bus`
 
 职责：
@@ -218,6 +251,8 @@ MVP 角色生成工作流阶段：
 事件最小字段：
 
 ```python
+JsonValue = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+
 class JobEvent(BaseModel):
     id: str
     job_id: str
@@ -225,9 +260,18 @@ class JobEvent(BaseModel):
     stage: str | None
     message: str
     progress: float | None
-    payload: dict[str, Any] = {}
+    payload: dict[str, JsonValue] = {}
     created_at: datetime
 ```
+
+事件重放机制：
+
+- `JobEvent` 必须先写入 SQLite `job_events`，再推送到内存 event bus；
+- `stream_job_events(job_id)` 建立订阅时，先按 `created_at, sequence` 从 SQLite 回放历史事件；
+- 回放完成后再切换到实时事件流；
+- 客户端可传入 `after_event_id` 或 `after_sequence`，用于断线续订；
+- 如果实时事件推送失败，不影响 job 执行，UI 可通过再次订阅重放补齐；
+- 这条规则用于避免 UI 晚于 `job.created` / `job.queued` 订阅导致早期事件丢失。
 
 ### 4.6 `bridle.harness.job_store`
 
@@ -363,8 +407,10 @@ sequenceDiagram
     Orchestrator->>Store: job.created/job.queued
     App-->>UI: JobRef(job_id)
 
-    UI->>App: stream_job_events(job_id)
-    App-->>UI: JobEvent stream
+    UI->>App: stream_job_events(job_id, after_sequence?)
+    App->>Store: replay historical events
+    Store-->>UI: job.created/job.queued replay
+    App-->>UI: live JobEvent stream
 
     Orchestrator->>Meshy: create preview task
     Meshy-->>Orchestrator: provider_task_id
@@ -417,7 +463,7 @@ sequenceDiagram
 - `stage`
 - `provider_id`
 - `retryable`
-- `safe_details`
+- `safe_details: str`
 
 严禁包含：
 
@@ -442,6 +488,14 @@ sequenceDiagram
 
 MVP 可以先只实现环境变量 + TOML 元数据，但接口按优先级设计。
 
+密钥安全规则：
+
+- TOML 中只允许写 `api_key_env = "ENV_VAR_NAME"` 这类环境变量引用；
+- TOML 禁止直接写入 `api_key`、`secret`、`token` 等明文字段；
+- 配置加载器发现疑似明文 Key 时必须拒绝加载或标记为安全错误；
+- 多来源配置指向同一 Provider Key 时，不静默覆盖，必须产生 warning，并在 UI 中展示“当前使用来源”；
+- 项目级配置不得存储密钥值，只能引用环境变量名或未来的 keyring alias。
+
 ### 8.2 配置示例
 
 ```toml
@@ -450,13 +504,13 @@ type = "llm"
 backend = "litellm"
 model = "deepseek/deepseek-chat"
 api_key_env = "DEEPSEEK_API_KEY"
-default_for = ["code", "context"]
+default_for = ["llm.chat", "llm.stream"]
 
 [providers.asset.meshy]
 type = "asset"
 capabilities = ["model3d.text_to_3d", "texture.retexture", "rigging.auto_rig"]
 api_key_env = "MESHY_API_KEY"
-default_for = ["model3d"]
+default_for = ["model3d.text_to_3d"]
 
 [godot]
 executable = "godot"
@@ -474,22 +528,9 @@ generated_assets_dir = "res://bridle/generated"
 
 ---
 
-## 9. Provider 能力模型
+## 9. Provider 能力模型与 Resolver
 
-能力声明示例：
-
-```python
-class ProviderCapability(str, Enum):
-    LLM_CHAT = "llm.chat"
-    LLM_STREAM = "llm.stream"
-    LLM_STRUCTURED_OUTPUT = "llm.structured_output"
-    MODEL3D_TEXT_TO_3D = "model3d.text_to_3d"
-    MODEL3D_IMAGE_TO_3D = "model3d.image_to_3d"
-    TEXTURE_RETEXTURE = "texture.retexture"
-    TEXTURE_PBR_GENERATE = "texture.pbr_generate"
-    RIGGING_AUTO_RIG = "rigging.auto_rig"
-    ANIMATION_VIDEO_TO_MOTION = "animation.video_to_motion"
-```
+`ProviderCapability` 的 canonical source 是 [04-architecture-decisions.md](04-architecture-decisions.md) 中的 ADR-005。概要设计只引用该枚举，不重复定义第二份能力列表，避免后续漂移。
 
 工作流请求只声明需要能力：
 
@@ -500,6 +541,30 @@ required_capabilities = [
 ```
 
 Provider resolver 负责选择默认 Provider 或用户指定 Provider。
+
+Resolver 规则：
+
+| 场景 | 规则 |
+|---|---|
+| 用户显式指定 Provider | 若 Provider 存在且满足全部 required capabilities，直接使用 |
+| 显式 Provider 不满足能力 | 抛出 `ProviderCapabilityError`，不自动换供应商 |
+| 未显式指定 Provider | 按 required capabilities 查找候选 |
+| 候选包含 `default_for` 匹配项 | 优先选择 `default_for` 覆盖 required capabilities 的 Provider |
+| 多个候选均匹配 | 选择配置文件中最先声明的 Provider |
+| 能力组合需要多个 Provider | Resolver 返回 Provider plan，例如 LLM 用 DeepSeek、3D 用 Meshy |
+| 无候选满足能力 | 抛出 `ProviderCapabilityError`，错误中列出缺失 capability |
+| Provider 未配置 Key | 抛出 `AuthError` 或 `ConfigError`，不降级到其他 Provider，除非用户启用 fallback |
+
+Provider plan 示例：
+
+```python
+class ProviderPlan(BaseModel):
+    llm_provider_id: str | None = None
+    model3d_provider_id: str | None = None
+    texture_provider_id: str | None = None
+    rigging_provider_id: str | None = None
+    animation_provider_id: str | None = None
+```
 
 ---
 
@@ -642,9 +707,119 @@ MVP 最小页面：
 
 1. `JobEvent` / `JobStatus` / `JobSpec` Pydantic schema；
 2. SQLite schema；
-3. Tauri ↔ Python sidecar 通信方式；
+3. stdio JSON-RPC 消息 schema；
 4. Meshy API adapter 详细状态映射；
 5. Godot 生成目录和 `.tscn/.tres` 写入规范；
 6. 桌面 UI 信息架构和页面原型；
 7. Provider 插件加载机制。
 
+---
+
+## 14. 日志与可观测性设计
+
+### 14.1 日志目标
+
+日志用于三类场景：
+
+- 用户在桌面端查看当前任务进度和失败原因；
+- 开发者调试 Provider、下载、导入、Godot CLI 问题；
+- 后续 OpenTelemetry tracing 和性能基线分析。
+
+### 14.2 日志级别
+
+| 级别 | 使用场景 | 是否显示在桌面默认日志 |
+|---|---|---|
+| `debug` | Provider 原始状态、轮询细节、内部状态转换 | 默认隐藏 |
+| `info` | job 阶段开始/完成、连接测试、下载进度 | 默认显示 |
+| `warning` | 可恢复问题、配置来源冲突、非致命导入 warning | 默认显示 |
+| `error` | job 失败、Provider 失败、Godot CLI 失败 | 默认显示 |
+| `critical` | sidecar 不可恢复错误、数据损坏 | 默认显示并提示导出诊断 |
+
+### 14.3 结构化日志字段
+
+日志事件与 `JobEvent` 对齐，至少包含：
+
+- `timestamp`
+- `level`
+- `event_type`
+- `job_id`
+- `stage`
+- `provider_id`
+- `message`
+- `safe_details`
+- `duration_ms`
+- `error_code`
+
+### 14.4 脱敏策略
+
+日志系统必须复用错误模型的脱敏规则：
+
+- 不记录完整 API Key；
+- 不记录 Authorization header；
+- 不记录带签名 URL；
+- 本地路径只在必要时记录，桌面展示可折叠；
+- Provider 原始响应进入 debug 日志前必须经过 sanitizer。
+
+### 14.5 桌面日志查看
+
+桌面端 Jobs 页面显示：
+
+- 当前 job 阶段；
+- 最近事件；
+- 可折叠详细日志；
+- 失败时的安全错误摘要；
+- “导出诊断包”入口，诊断包默认不包含密钥。
+
+---
+
+## 15. 安全设计
+
+### 15.1 Sidecar 通信安全
+
+MVP 使用 stdio JSON-RPC，因此默认信道只存在于 Tauri 启动的子进程 stdin/stdout 之间，不开放网络端口。
+
+约束：
+
+- sidecar 不监听公网或局域网端口；
+- 若启用 localhost 备选通道，必须绑定 `127.0.0.1`；
+- localhost 通道必须使用随机端口和一次性 token；
+- sidecar 应校验 `protocol_version`，拒绝未知协议版本。
+
+### 15.2 持久化敏感字段
+
+SQLite 和 TOML 中字段按敏感级别分类：
+
+| 类型 | 示例 | MVP 处理 |
+|---|---|---|
+| Secret | API Key、token、client secret | 禁止持久化明文 |
+| Sensitive | 本地项目路径、Provider account id | 可持久化，但日志脱敏或折叠展示 |
+| Public | provider id、capability、模型名 | 可持久化 |
+
+P1 引入系统钥匙串后，SQLite/TOML 只保存 key alias，不保存 secret value。
+
+### 15.3 资产文件来源校验
+
+下载资产必须记录：
+
+- provider id；
+- 原始 URL 的脱敏摘要；
+- content length；
+- content type；
+- sha256；
+- 下载时间；
+- 本地路径。
+
+MVP 校验：
+
+- 下载大小超过配置上限时失败；
+- content type 或扩展名与期望格式严重不符时 warning 或失败；
+- GLB 必须可解析，否则进入 `AssetValidationError`；
+- zip/压缩包解压必须防止 path traversal；
+- 生成文件只能写入项目内约定目录。
+
+### 15.4 Godot 项目写入安全
+
+- 所有生成资产默认写入 `res://bridle/generated/<asset_id>/`；
+- 不覆盖用户已有文件，除非文件由同一 `asset_id` 生成且 job 明确处于恢复模式；
+- 输出路径必须规范化并验证位于 Godot 项目根目录内；
+- 失败时保留中间产物和日志，但标记状态，避免 Godot 误认为完整资产。

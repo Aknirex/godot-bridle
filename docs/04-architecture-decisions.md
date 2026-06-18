@@ -350,6 +350,36 @@ Bridle 被确认定位为：
 
 ---
 
+### ADR-014：Tauri 与 Python Sidecar 采用 stdio JSON-RPC
+
+**决策**：MVP 中 Tauri 与 Python sidecar 的主通信协议采用 stdio JSON-RPC。备选方案为 localhost WebSocket/HTTP，仅在 stdio 无法满足事件流或调试需求时启用。
+
+**理由**：
+
+- Tauri 对 sidecar 进程模型支持自然，stdio 不需要额外端口；
+- 避免 localhost HTTP/WebSocket 带来的端口冲突、防火墙提示和本机服务暴露面；
+- JSON-RPC 足够表达 request/response、错误和方法版本；
+- 事件流可以通过 JSON lines notification 实现；
+- CLI 和测试可以复用同一 application service，而不要求运行 Web server。
+
+**协议约束**：
+
+- 每条消息为一行 UTF-8 JSON，即 JSON Lines；
+- request 使用 JSON-RPC 2.0 风格：`jsonrpc`、`id`、`method`、`params`；
+- response 必须包含同一 `id`；
+- job 事件通过 notification 推送：无 `id`，`method = "job.event"`；
+- 所有消息必须带 `protocol_version`；
+- sidecar 启动后先发送 `sidecar.ready`；
+- 长任务 command 只能返回 `job_id`，不能阻塞等待任务完成。
+
+**备选条件**：
+
+- 如果 Tauri stdio 对高频事件或二进制数据不合适，允许引入 localhost WebSocket 作为事件通道；
+- localhost 通道必须绑定 `127.0.0.1`，使用随机端口和一次性 token；
+- 不允许把 WebUI 或远程 HTTP API 作为 MVP 产品形态。
+
+---
+
 ## 3. 总体架构
 
 ```
@@ -470,6 +500,7 @@ godot-bridle/
 |---|---|
 | 桌面壳 | Tauri v2 优先，PySide6 备选 |
 | 前端 | TypeScript + 轻量组件体系 |
+| Tauri ↔ Python 通信 | stdio JSON-RPC over JSON Lines |
 | Python 核心 | Python 3.11+ |
 | 依赖管理 | uv 优先，Poetry 备选 |
 | LLM 适配 | LiteLLM SDK |
