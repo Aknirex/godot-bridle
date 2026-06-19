@@ -133,3 +133,14 @@ async def test_sidecar_reports_parse_error_for_invalid_json(tmp_path) -> None:
         assert response["error"]["message"] == "Parse error"
     finally:
         await sidecar.stop()
+
+
+async def test_sidecar_preserves_request_id_for_method_error(tmp_path) -> None:
+    sidecar, written = await make_sidecar(tmp_path)
+    try:
+        await sidecar.handle_line('{"jsonrpc":"2.0","id":7,"method":"unknown"}')
+
+        assert written[-1]["id"] == 7
+        assert written[-1]["error"]["code"] == -32601
+    finally:
+        await sidecar.stop()

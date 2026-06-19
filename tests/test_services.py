@@ -13,7 +13,11 @@ async def test_service_lists_default_providers(tmp_path) -> None:
     try:
         providers = await service.list_providers()
 
-        assert [provider["provider_id"] for provider in providers] == ["deepseek", "meshy_mock"]
+        assert [provider["provider_id"] for provider in providers] == [
+            "deepseek",
+            "meshy_mock",
+            "meshy",
+        ]
     finally:
         store.close()
 

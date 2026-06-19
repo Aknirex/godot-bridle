@@ -101,6 +101,19 @@ class MeshyProvider:
             raw=_json_object(response),
         )
 
+    async def submit_refine(self, preview_task_id: str) -> AssetTaskRef:
+        api_key = self.key_resolver.resolve_required(self.config)
+        response = await self._request(
+            "POST",
+            "/openapi/v2/text-to-3d",
+            api_key=api_key,
+            json={"mode": "refine", "preview_task_id": preview_task_id},
+        )
+        task_id = str(response.get("result") or response.get("id") or "")
+        if not task_id:
+            raise ProviderError("Meshy refine response did not include a task id.")
+        return AssetTaskRef(provider_id=self.config.provider_id, task_id=task_id)
+
     async def _request(
         self,
         method: str,
@@ -162,6 +175,13 @@ class MockMeshyProvider:
             task_id=task_id,
             status=AssetTaskStatus.SUCCEEDED,
             asset_urls=[f"mock://meshy/{task_id}.glb"],
+        )
+
+    async def submit_refine(self, preview_task_id: str) -> AssetTaskRef:
+        await asyncio.sleep(0)
+        return AssetTaskRef(
+            provider_id=self.config.provider_id,
+            task_id=f"{preview_task_id}_refined",
         )
 
 

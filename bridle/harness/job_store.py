@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from bridle.domain.assets import GeneratedAssetRecord
 from bridle.domain.errors import JobNotFoundError
 from bridle.domain.events import JobEvent, JsonValue
 from bridle.domain.jobs import JobState, JobStatus
@@ -59,6 +60,22 @@ class SQLiteJobStore:
 
             CREATE INDEX IF NOT EXISTS idx_job_events_job_sequence
                 ON job_events(job_id, sequence);
+
+            CREATE TABLE IF NOT EXISTS generated_assets (
+                asset_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                project_root TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                res_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_generated_assets_project
+                ON generated_assets(project_root);
             """
         )
         self._conn.commit()
@@ -194,6 +211,47 @@ class SQLiteJobStore:
             (job_id, after_sequence),
         ).fetchall()
         return [_event_from_row(row) for row in rows]
+
+    def save_generated_asset(
+        self,
+        job_id: str,
+        project_root: Path,
+        record: GeneratedAssetRecord,
+    ) -> GeneratedAssetRecord:
+        self.get_job(job_id)
+        now = utc_now().isoformat()
+        self._conn.execute(
+            """
+            INSERT INTO generated_assets (
+                asset_id, job_id, project_root, provider_id, res_path, status,
+                record_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'ready', ?, ?, ?)
+            ON CONFLICT(asset_id) DO UPDATE SET
+                record_json = excluded.record_json,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            """,
+            (
+                record.asset_id,
+                job_id,
+                str(project_root.resolve()),
+                record.provider_id,
+                record.godot_resource_path,
+                record.model_dump_json(),
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+        return record
+
+    def get_generated_asset(self, asset_id: str) -> GeneratedAssetRecord | None:
+        row = self._conn.execute(
+            "SELECT record_json FROM generated_assets WHERE asset_id = ?", (asset_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return GeneratedAssetRecord.model_validate_json(row["record_json"])
 
     def _next_sequence(self, job_id: str) -> int:
         row = self._conn.execute(

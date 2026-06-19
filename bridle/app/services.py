@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from bridle import __version__
 from bridle.config.key_resolver import KeyResolver
 from bridle.domain.capabilities import ProviderCapability
+from bridle.domain.errors import ConfigError, ProviderCapabilityError
 from bridle.domain.jobs import JobRef, JobStatus
 from bridle.domain.projects import ProjectSummary
 from bridle.domain.providers import (
@@ -15,6 +18,10 @@ from bridle.domain.providers import (
     ProviderKind,
 )
 from bridle.godot.project import detect_project
+from bridle.harness.character_workflow import (
+    CharacterGenerationRequest,
+    CharacterGenerationWorkflow,
+)
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
@@ -80,6 +87,31 @@ class BridleAppService:
 
     async def submit_workflow(self, params: dict) -> JobRef:
         workflow_id = str(params.get("workflow_id", "mock.sleep"))
+        if workflow_id == "character_gen":
+            try:
+                request = CharacterGenerationRequest.model_validate(params)
+            except ValidationError as error:
+                raise ConfigError("Invalid character generation request.") from error
+            provider_config = self._provider_by_id(request.provider_id)
+            if provider_config.backend == "mock_meshy":
+                provider = MockMeshyProvider(provider_config)
+            elif provider_config.backend == "meshy":
+                provider = MeshyProvider(provider_config, self.key_resolver)
+            else:
+                raise ProviderCapabilityError(
+                    f"Provider {request.provider_id!r} is not a supported asset provider."
+                )
+            llm_provider = None
+            if request.enhance_prompt:
+                llm_config = self._provider_by_id("deepseek")
+                llm_provider = LiteLlmProvider(llm_config, self.key_resolver)
+            workflow = CharacterGenerationWorkflow(
+                request,
+                provider,
+                llm_provider=llm_provider,
+            )
+            return await self.orchestrator.submit(workflow_id, workflow.run)
+
         duration_ms = int(params.get("duration_ms", 10))
 
         async def handler(context: JobContext) -> None:
@@ -99,7 +131,7 @@ class BridleAppService:
         for provider in self.providers:
             if provider.provider_id == provider_id:
                 return provider
-        return ProviderConfig(provider_id=provider_id, kind=ProviderKind.GATEWAY)
+        raise ProviderCapabilityError(f"Provider {provider_id!r} is not configured.")
 
 
 def default_provider_configs() -> list[ProviderConfig]:
@@ -119,5 +151,12 @@ def default_provider_configs() -> list[ProviderConfig]:
             backend="mock_meshy",
             capabilities=[ProviderCapability.MODEL3D_TEXT_TO_3D],
             default_for=[ProviderCapability.MODEL3D_TEXT_TO_3D],
+        ),
+        ProviderConfig(
+            provider_id="meshy",
+            kind=ProviderKind.ASSET,
+            backend="meshy",
+            api_key_env="MESHY_API_KEY",
+            capabilities=[ProviderCapability.MODEL3D_TEXT_TO_3D],
         ),
     ]

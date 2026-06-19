@@ -2,7 +2,8 @@
 
 Desktop-first AI harness for Godot asset generation workflows.
 
-The current repository is in early software-engineering setup. Design documents live in `docs/`; implementation starts with the Python core and then the Tauri desktop shell.
+The repository contains the Python workflow core and an initial Tauri desktop shell. Design and
+delivery documents live in `docs/`.
 
 ## Development
 
@@ -17,6 +18,9 @@ The desktop shell will talk to the Python core through the stdio JSON-RPC sideca
 ```powershell
 uv run bridle sidecar
 ```
+
+The Tauri v2 desktop MVP lives in `desktop/`. Development and packaging instructions are in
+[`docs/09-alpha-development-and-packaging.md`](docs/09-alpha-development-and-packaging.md).
 
 ## Roadmap
 

@@ -5,7 +5,8 @@ import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from bridle.domain.errors import BridleError
+from bridle.domain.errors import BridleError, JobCancelledError
+from bridle.domain.events import JsonValue
 from bridle.domain.jobs import JobRef, JobState, JobStatus
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
@@ -27,6 +28,7 @@ class JobContext:
         *,
         stage: str | None = None,
         progress: float | None = None,
+        payload: dict[str, JsonValue] | None = None,
     ) -> None:
         await self.events.emit(
             self.job_id,
@@ -34,7 +36,15 @@ class JobContext:
             message,
             stage=stage,
             progress=progress,
+            payload=payload,
         )
+
+    def check_cancelled(self) -> None:
+        if self.store.get_job(self.job_id).state == JobState.CANCEL_REQUESTED:
+            raise JobCancelledError()
+
+    def set_state(self, state: JobState, *, progress: float | None = None) -> None:
+        self.store.update_job(self.job_id, state, progress=progress)
 
 
 @dataclass(frozen=True)
@@ -115,6 +125,10 @@ class AsyncTaskOrchestrator:
         )
         try:
             await queued.handler(context)
+        except JobCancelledError:
+            self.store.update_job(queued.job_id, JobState.CANCELLED)
+            await self.events.emit(queued.job_id, "job.cancelled", "Job cancelled")
+            return
         except BridleError as error:
             self.store.update_job(
                 queued.job_id,

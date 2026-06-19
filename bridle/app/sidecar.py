@@ -54,14 +54,15 @@ class JsonRpcSidecar:
         await self.service.stop()
 
     async def handle_line(self, line: str) -> None:
+        request_id: Any = None
         try:
             request = self._parse_request(line)
+            request_id = request.get("id")
             result = await self._dispatch(request)
         except JsonRpcProtocolError as error:
-            await self._write_error(None, error.code, error.message)
+            await self._write_error(request_id, error.code, error.message)
             return
 
-        request_id = request.get("id")
         if request_id is not None:
             await self._write_result(request_id, result)
 

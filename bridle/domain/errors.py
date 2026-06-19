@@ -43,3 +43,8 @@ class ProviderCapabilityError(BridleError):
 class JobNotFoundError(BridleError):
     def __init__(self, job_id: str) -> None:
         super().__init__(BridleErrorCode.JOB_NOT_FOUND, f"Job not found: {job_id}")
+
+
+class JobCancelledError(BridleError):
+    def __init__(self) -> None:
+        super().__init__(BridleErrorCode.JOB_CANCELLED, "Job cancellation was requested.")

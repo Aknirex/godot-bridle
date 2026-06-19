@@ -1,0 +1,17 @@
+[package]
+name = "godot-bridle-desktop"
+version = "0.1.0-alpha.0"
+description = "Desktop UI for Godot Bridle"
+edition = "2021"
+
+[lib]
+name = "godot_bridle_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

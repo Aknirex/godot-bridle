@@ -18,6 +18,11 @@ async def download_asset(
     filename: str,
     max_bytes: int = 250 * 1024 * 1024,
     client: httpx.AsyncClient | None = None,
+    allowed_content_types: tuple[str, ...] = (
+        "model/gltf-binary",
+        "application/octet-stream",
+        "application/gltf-buffer",
+    ),
 ) -> DownloadedAsset:
     ensure_inside_project(project_root, destination_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +39,9 @@ async def download_asset(
         async with active_client.stream("GET", url) as response:
             response.raise_for_status()
             content_type = response.headers.get("content-type")
+            normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+            if normalized_content_type and normalized_content_type not in allowed_content_types:
+                raise ProviderError("Downloaded asset has an unsupported content type.")
             content_length = response.headers.get("content-length")
             if content_length is not None and int(content_length) > max_bytes:
                 raise ProviderError("Downloaded asset exceeds maximum allowed size.")
