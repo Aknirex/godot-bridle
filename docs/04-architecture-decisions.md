@@ -380,6 +380,38 @@ Bridle 被确认定位为：
 
 ---
 
+### ADR-015：向量数据库作为 RAG 索引，不替代 SQLite 事实存储
+
+**决策**：P1 引入本地向量知识库，用于 Godot 项目、Bridle 文档、生成资产记录和导入日志的语义检索；SQLite 继续作为 job、事件、配置元数据和资产主记录的事实存储。
+
+**默认向量库**：Chroma local persistent store。
+
+**预留后端**：
+
+- Milvus：团队或大规模向量检索场景；
+- Elasticsearch/OpenSearch：混合检索和日志检索；
+- FAISS/SQLite fallback：轻量实验模式。
+
+**理由**：
+
+- Bridle 是桌面本地优先工具，不应要求用户部署外部数据库；
+- job 状态和事件回放需要强顺序和结构化查询，SQLite 更合适；
+- Godot 脚本、场景、导入日志、错误说明和文档知识适合语义检索；
+- RAG 能自然增强资产生成 Prompt、导入失败诊断和项目问答；
+- 向量索引可重建，不应成为唯一事实源。
+
+**实现约束**：
+
+- 向量库只保存可重建 chunk、embedding 和 metadata；
+- metadata 不允许包含 API key、authorization header 或带签名 URL；
+- collection 必须按项目隔离，删除项目或导出诊断包时可清理；
+- RAG 回答必须返回引用来源，区分项目事实和模型推断；
+- Embedding Provider 必须复用 BYOK、脱敏和连接测试规则。
+
+详见 [08-rag-vector-knowledge-base.md](08-rag-vector-knowledge-base.md)。
+
+---
+
 ## 3. 总体架构
 
 ```
@@ -512,6 +544,7 @@ godot-bridle/
 | Key P0 | 环境变量 + 脱敏 + 连接测试 |
 | Key P1 | keyring / 系统钥匙串 |
 | 持久化 | SQLite |
+| 向量知识库 P1 | Chroma local persistent store，预留 Milvus/Elasticsearch |
 | 异步任务编排 | asyncio + bounded queue + worker pool |
 | 文件缓存 | 内容哈希目录或 diskcache |
 | 日志 | structlog |

@@ -347,6 +347,41 @@ res://bridle/generated/<asset_id>/
   bridle_asset.json
 ```
 
+### 4.10 `bridle.knowledge`（P1）
+
+职责：
+
+- 索引 Godot 项目文件、Bridle 文档、生成资产记录和导入日志；
+- 将脚本、场景、manifest、错误日志切分为可检索 chunk；
+- 通过 Embedding Provider 写入本地向量库；
+- 为资产生成、导入诊断和项目问答提供 RAG 检索上下文；
+- 返回带引用来源、相似度和延迟指标的回答。
+
+P1 默认向量库：
+
+- Chroma local persistent store；
+- collection 按项目隔离；
+- 向量索引可重建，不作为事实源；
+- SQLite 仍负责 job、event、provider config 和 generated asset 主记录。
+
+核心接口草案：
+
+```python
+class KnowledgeService:
+    async def index_project(self, project_root: Path) -> KnowledgeIndexSummary: ...
+    async def ask_project(self, project_root: Path, question: str) -> RagAnswer: ...
+    async def retrieve(
+        self,
+        project_root: Path,
+        query: str,
+        *,
+        top_k: int = 6,
+        filters: dict[str, JsonValue] | None = None,
+    ) -> list[RetrievalHit]: ...
+```
+
+详见 [08-rag-vector-knowledge-base.md](08-rag-vector-knowledge-base.md)。
+
 ---
 
 ## 5. 异步 job 生命周期
@@ -594,6 +629,19 @@ MVP 最小页面：
    - 阶段日志；
    - 取消按钮；
    - 成功后的资产路径和打开提示。
+
+P1 增加：
+
+5. **Knowledge**
+   - 项目知识库索引状态；
+   - 文档数、chunk 数、最近更新时间；
+   - 重新索引；
+   - 索引错误和跳过文件摘要。
+
+6. **Assistant**
+   - 基于当前 Godot 项目的 RAG 问答；
+   - 展示回答、引用片段、来源文件、相似度和响应耗时；
+   - 对导入失败 job 展示诊断建议和相关日志。
 
 约束：
 

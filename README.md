@@ -17,3 +17,10 @@ The desktop shell will talk to the Python core through the stdio JSON-RPC sideca
 ```powershell
 uv run bridle sidecar
 ```
+
+## Roadmap
+
+- v0.1-alpha: desktop-first Godot asset generation workflow with BYOK, async jobs,
+  Meshy integration, GLB inspection, and Godot CLI import checks.
+- P1: local RAG knowledge base for Godot project context, generated asset records,
+  import logs, and Bridle docs. See `docs/08-rag-vector-knowledge-base.md`.
