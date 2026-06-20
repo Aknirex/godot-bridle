@@ -4,6 +4,7 @@ import asyncio
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from time import perf_counter
 
 from bridle.domain.errors import BridleError, JobCancelledError
 from bridle.domain.events import JsonValue
@@ -123,6 +124,7 @@ class AsyncTaskOrchestrator:
             events=self.events,
             store=self.store,
         )
+        started = perf_counter()
         try:
             await queued.handler(context)
         except JobCancelledError:
@@ -158,6 +160,14 @@ class AsyncTaskOrchestrator:
                 payload={"error_code": "internal_error", "safe_details": safe_details},
             )
             return
+        finally:
+            self.store.record_benchmark(
+                "workflow.duration",
+                job_id=queued.job_id,
+                duration_ms=round((perf_counter() - started) * 1000),
+                unit="ms",
+                metadata={"workflow_id": queued.workflow_id},
+            )
 
         latest = self.store.get_job(queued.job_id)
         if latest.state == JobState.CANCEL_REQUESTED:

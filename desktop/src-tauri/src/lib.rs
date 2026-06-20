@@ -23,13 +23,26 @@ fn sidecar_request(
 }
 
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
-    let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .ok_or("Cannot locate project root")?;
-    let mut child = Command::new("uv")
-        .args(["run", "bridle", "sidecar"])
-        .current_dir(project_root)
+    let mut command = if cfg!(debug_assertions) {
+        let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .ok_or("Cannot locate project root")?;
+        let mut command = Command::new("uv");
+        command
+            .args(["run", "bridle", "sidecar"])
+            .current_dir(project_root);
+        command
+    } else {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("Cannot locate desktop executable: {error}"))?;
+        let sidecar = executable
+            .parent()
+            .ok_or("Cannot locate desktop executable directory")?
+            .join("bridle-sidecar");
+        Command::new(sidecar)
+    };
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

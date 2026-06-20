@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 
 from bridle.domain.assets import DownloadedAsset
 from bridle.domain.jobs import JobState
@@ -79,5 +80,66 @@ def test_job_store_persists_generated_asset_record(tmp_path) -> None:
         loaded = store.get_generated_asset(record.asset_id)
         assert loaded is not None
         assert loaded.sha256 == record.sha256
+    finally:
+        store.close()
+
+
+def test_migrations_upgrade_legacy_database_and_are_idempotent(tmp_path) -> None:
+    db_path = tmp_path / "bridle.sqlite3"
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        "CREATE TABLE jobs (job_id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, "
+        "state TEXT NOT NULL, progress REAL, created_at TEXT NOT NULL, "
+        "updated_at TEXT NOT NULL, error_code TEXT, safe_details TEXT)"
+    )
+    connection.commit()
+    connection.close()
+
+    store = SQLiteJobStore(db_path)
+    store.close()
+    reopened = SQLiteJobStore(db_path)
+    try:
+        versions = reopened._conn.execute(  # noqa: SLF001 - verifies persisted schema state
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        tables = {
+            row[0]
+            for row in reopened._conn.execute(  # noqa: SLF001
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert [row[0] for row in versions] == [1, 2, 3]
+        assert {"projects", "provider_configs", "benchmark_samples"} <= tables
+        assert db_path.with_suffix(".sqlite3.bak-v0").exists()
+    finally:
+        reopened.close()
+
+
+def test_job_store_persists_project_provider_and_benchmark(tmp_path) -> None:
+    from bridle.app.services import default_provider_configs
+    from bridle.godot.project import detect_project
+
+    project = tmp_path / "game"
+    project.mkdir()
+    (project / "project.godot").write_text(
+        'config/name="Demo"\nconfig/features=PackedStringArray("4.3")\n',
+        encoding="utf-8",
+    )
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    try:
+        store.save_project(detect_project(project))
+        store.save_provider_config(default_provider_configs()[0])
+        sample_id = store.record_benchmark("test.duration", duration_ms=12, unit="ms")
+
+        project_row = store._conn.execute("SELECT * FROM projects").fetchone()  # noqa: SLF001
+        provider_row = store._conn.execute(  # noqa: SLF001
+            "SELECT * FROM provider_configs"
+        ).fetchone()
+        sample_row = store._conn.execute(  # noqa: SLF001
+            "SELECT * FROM benchmark_samples WHERE id = ?", (sample_id,)
+        ).fetchone()
+        assert project_row["godot_version"] == "4.3"
+        assert provider_row["api_key_env"] == "DEEPSEEK_API_KEY"
+        assert sample_row["duration_ms"] == 12
     finally:
         store.close()

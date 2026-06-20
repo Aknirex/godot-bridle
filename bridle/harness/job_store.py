@@ -11,6 +11,9 @@ from bridle.domain.assets import GeneratedAssetRecord
 from bridle.domain.errors import JobNotFoundError
 from bridle.domain.events import JobEvent, JsonValue
 from bridle.domain.jobs import JobState, JobStatus
+from bridle.domain.projects import ProjectSummary
+from bridle.domain.providers import ProviderConfig
+from bridle.storage.database import migrate_database
 
 
 def utc_now() -> datetime:
@@ -31,54 +34,107 @@ class SQLiteJobStore:
         self._conn.close()
 
     def migrate(self) -> None:
-        self._conn.executescript(
+        migrate_database(self._conn, self.db_path)
+
+    def save_project(self, summary: ProjectSummary) -> None:
+        now = utc_now().isoformat()
+        root = str(summary.root_path.resolve())
+        self._conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS jobs (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                state TEXT NOT NULL,
-                progress REAL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                error_code TEXT,
-                safe_details TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS job_events (
-                id TEXT PRIMARY KEY,
-                job_id TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                stage TEXT,
-                message TEXT NOT NULL,
-                progress REAL,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE,
-                UNIQUE(job_id, sequence)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_job_events_job_sequence
-                ON job_events(job_id, sequence);
-
-            CREATE TABLE IF NOT EXISTS generated_assets (
-                asset_id TEXT PRIMARY KEY,
-                job_id TEXT NOT NULL,
-                project_root TEXT NOT NULL,
-                provider_id TEXT NOT NULL,
-                res_path TEXT NOT NULL,
-                status TEXT NOT NULL,
-                record_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_generated_assets_project
-                ON generated_assets(project_root);
-            """
+            INSERT INTO projects (
+                id, root_path, project_name, godot_version, generated_assets_dir,
+                metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(root_path) DO UPDATE SET
+                project_name = excluded.project_name,
+                godot_version = excluded.godot_version,
+                generated_assets_dir = excluded.generated_assets_dir,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                f"project_{uuid4().hex}",
+                root,
+                summary.project_name,
+                summary.godot_version,
+                summary.generated_assets_dir,
+                json.dumps(summary.model_dump(mode="json"), ensure_ascii=False),
+                now,
+                now,
+            ),
         )
         self._conn.commit()
+
+    def save_provider_config(self, config: ProviderConfig) -> None:
+        now = utc_now().isoformat()
+        self._conn.execute(
+            """
+            INSERT INTO provider_configs (
+                provider_id, kind, backend, model, base_url, api_key_env,
+                capabilities_json, default_for_json, key_source, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider_id) DO UPDATE SET
+                kind = excluded.kind,
+                backend = excluded.backend,
+                model = excluded.model,
+                base_url = excluded.base_url,
+                api_key_env = excluded.api_key_env,
+                capabilities_json = excluded.capabilities_json,
+                default_for_json = excluded.default_for_json,
+                key_source = excluded.key_source,
+                updated_at = excluded.updated_at
+            """,
+            (
+                config.provider_id,
+                config.kind.value,
+                config.backend,
+                config.model,
+                config.base_url,
+                config.api_key_env,
+                json.dumps([value.value for value in config.capabilities]),
+                json.dumps([value.value for value in config.default_for]),
+                "environment" if config.api_key_env else "none",
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+
+    def record_benchmark(
+        self,
+        metric_name: str,
+        *,
+        job_id: str | None = None,
+        stage: str | None = None,
+        provider_id: str | None = None,
+        duration_ms: int | None = None,
+        value: float | None = None,
+        unit: str | None = None,
+        metadata: dict[str, JsonValue] | None = None,
+    ) -> str:
+        sample_id = f"benchmark_{uuid4().hex}"
+        self._conn.execute(
+            """
+            INSERT INTO benchmark_samples (
+                id, job_id, metric_name, stage, provider_id, duration_ms,
+                value, unit, metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sample_id,
+                job_id,
+                metric_name,
+                stage,
+                provider_id,
+                duration_ms,
+                value,
+                unit,
+                json.dumps(metadata or {}, ensure_ascii=False),
+                utc_now().isoformat(),
+            ),
+        )
+        self._conn.commit()
+        return sample_id
 
     def create_job(self, workflow_id: str, job_id: str | None = None) -> JobStatus:
         now = utc_now()

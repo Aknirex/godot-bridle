@@ -26,7 +26,6 @@ from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
 from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
-from bridle.providers.llm_litellm import LiteLlmProvider
 
 
 class BridleAppService:
@@ -66,7 +65,9 @@ class BridleAppService:
         }
 
     async def open_project(self, path: str) -> ProjectSummary:
-        return detect_project(Path(path))
+        summary = detect_project(Path(path))
+        self.store.save_project(summary)
+        return summary
 
     async def list_providers(self) -> list[dict]:
         return [provider.model_dump(mode="json") for provider in self.providers]
@@ -74,6 +75,8 @@ class BridleAppService:
     async def test_provider(self, provider_id: str) -> ProviderHealth:
         provider = self._provider_by_id(provider_id)
         if provider.kind == ProviderKind.LLM:
+            from bridle.providers.llm_litellm import LiteLlmProvider
+
             return await LiteLlmProvider(provider, self.key_resolver).test_connection()
         if provider.kind == ProviderKind.ASSET and provider.backend == "mock_meshy":
             return await MockMeshyProvider(provider).test_connection()
@@ -103,6 +106,8 @@ class BridleAppService:
                 )
             llm_provider = None
             if request.enhance_prompt:
+                from bridle.providers.llm_litellm import LiteLlmProvider
+
                 llm_config = self._provider_by_id("deepseek")
                 llm_provider = LiteLlmProvider(llm_config, self.key_resolver)
             workflow = CharacterGenerationWorkflow(

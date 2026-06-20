@@ -13,7 +13,10 @@ from bridle.godot.project import (
 
 
 def test_detect_project_reads_name_and_counts_files(tmp_path) -> None:
-    (tmp_path / "project.godot").write_text('config/name="Demo"\n', encoding="utf-8")
+    (tmp_path / "project.godot").write_text(
+        'config/name="Demo"\nconfig/features=PackedStringArray("4.3", "GL Compatibility")\n',
+        encoding="utf-8",
+    )
     (tmp_path / "player.gd").write_text("extends Node\n", encoding="utf-8")
     (tmp_path / "main.tscn").write_text("[gd_scene]\n", encoding="utf-8")
     (tmp_path / "thing.tres").write_text("[gd_resource]\n", encoding="utf-8")
@@ -21,9 +24,33 @@ def test_detect_project_reads_name_and_counts_files(tmp_path) -> None:
     summary = detect_project(tmp_path)
 
     assert summary.project_name == "Demo"
+    assert summary.godot_version == "4.3"
     assert summary.gdscript_files_count == 1
     assert summary.scene_files_count == 1
     assert summary.resource_files_count == 1
+
+
+def test_detect_project_lists_installed_and_enabled_addons(tmp_path) -> None:
+    (tmp_path / "project.godot").write_text(
+        '[application]\nconfig/features=PackedStringArray("4.4")\n'
+        '[editor_plugins]\nenabled=PackedStringArray("res://addons/active/plugin.cfg")\n',
+        encoding="utf-8",
+    )
+    active = tmp_path / "addons" / "active"
+    inactive = tmp_path / "addons" / "inactive"
+    active.mkdir(parents=True)
+    inactive.mkdir(parents=True)
+    (active / "plugin.cfg").write_text('[plugin]\nname="Active Plugin"\n', encoding="utf-8")
+    (inactive / "plugin.cfg").write_text('[plugin]\nname="Inactive Plugin"\n', encoding="utf-8")
+
+    summary = detect_project(tmp_path)
+
+    assert summary.installed_addons_count == 2
+    assert summary.enabled_addons_count == 1
+    assert [(addon.name, addon.enabled) for addon in summary.addons] == [
+        ("Active Plugin", True),
+        ("Inactive Plugin", False),
+    ]
 
 
 def test_detect_project_requires_project_file(tmp_path) -> None:

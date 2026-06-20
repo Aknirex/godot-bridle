@@ -1,33 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { RpcClient, type Json, type RpcMessage } from "./rpc";
+import { activateJob, appState } from "./state";
+import { appendJobEvent, showError } from "./views";
 import "./style.css";
 
-type Json = Record<string, unknown>;
-type RpcMessage = { id?: number; result?: unknown; error?: Json; method?: string; params?: Json };
+const client = new RpcClient(invoke, (event) =>
+  appendJobEvent($("#events"), $("#progress"), event),
+);
 
-let requestId = 0;
-let activeJob = "";
-const pending = new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>();
-
-await listen<RpcMessage>("sidecar-message", ({ payload }) => {
-  if (payload.id !== undefined) {
-    const waiter = pending.get(payload.id);
-    if (!waiter) return;
-    pending.delete(payload.id);
-    payload.error
-      ? waiter.reject(new Error(String(payload.error.message ?? "Sidecar request failed")))
-      : waiter.resolve(payload.result);
-    return;
-  }
-  if (payload.method === "job.event") appendJobEvent(payload.params?.event as Json);
+void listen<RpcMessage>("sidecar-message", ({ payload }) => {
+  client.handle(payload);
 });
 
 async function rpc(method: string, params: Json = {}): Promise<unknown> {
-  const id = ++requestId;
-  const response = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
-  await invoke("sidecar_request", { request: { jsonrpc: "2.0", id, method, params } });
-  return response;
+  return client.request(method, params);
 }
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
@@ -84,7 +72,7 @@ $("#open-project").onclick = async () => {
   try {
     const result = await rpc("open_project", { path: projectPath.value });
     $("#project-result").textContent = JSON.stringify(result, null, 2);
-  } catch (error) { showError("#project-result", error); }
+  } catch (error) { showError($("#project-result"), error); }
 };
 
 $("#browse-project").onclick = async () => {
@@ -102,31 +90,18 @@ $("#generate-button").onclick = async () => {
       enhance_prompt: ($("#enhance-prompt") as HTMLInputElement).checked,
       ...(godot ? { godot_executable: godot } : {}),
     }) as { job_id: string };
-    activeJob = result.job_id;
-    $("#job-id").textContent = activeJob;
+    activateJob(appState, result.job_id);
+    $("#job-id").textContent = appState.activeJob;
     $("#events").replaceChildren();
-    await rpc("stream_job_events", { job_id: activeJob, after_sequence: 0 });
-    $("#generate-result").textContent = `Submitted ${activeJob}`;
+    await rpc("stream_job_events", { job_id: appState.activeJob, after_sequence: 0 });
+    $("#generate-result").textContent = `Submitted ${appState.activeJob}`;
     (document.querySelector('[data-page="jobs"]') as HTMLButtonElement).click();
-  } catch (error) { showError("#generate-result", error); }
+  } catch (error) { showError($("#generate-result"), error); }
 };
 
 $("#cancel-job").onclick = async () => {
-  if (activeJob) await rpc("cancel_job", { job_id: activeJob });
+  if (appState.activeJob) await rpc("cancel_job", { job_id: appState.activeJob });
 };
-
-function appendJobEvent(event: Json) {
-  if (!event) return;
-  const row = document.createElement("div");
-  row.innerHTML = `<time>${String(event.sequence).padStart(2, "0")}</time><b>${event.stage ?? event.type}</b><span>${event.message}</span>`;
-  $("#events").append(row);
-  const value = typeof event.progress === "number" ? event.progress * 100 : 0;
-  ($("#progress") as HTMLElement).style.width = `${value}%`;
-}
-
-function showError(selector: string, error: unknown) {
-  $(selector).textContent = error instanceof Error ? error.message : String(error);
-}
 
 async function initialize() {
   try {
