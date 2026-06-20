@@ -25,6 +25,9 @@ assets = [
 packaging = [
   "pyinstaller>=6.10.0",
 ]
+knowledge = [
+  "chromadb>=1.0.0",
+]
 
 [project.scripts]
 bridle = "bridle.app.cli:main"

@@ -132,7 +132,7 @@ def test_migrations_upgrade_legacy_database_and_are_idempotent(tmp_path) -> None
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert [row[0] for row in versions] == [1, 2, 3]
+        assert [row[0] for row in versions] == [1, 2, 3, 4]
         assert {"projects", "provider_configs", "benchmark_samples"} <= tables
         assert db_path.with_suffix(".sqlite3.bak-v0").exists()
     finally:
