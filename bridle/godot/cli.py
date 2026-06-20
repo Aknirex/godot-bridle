@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 
 from bridle.domain.assets import GodotImportResult
@@ -28,11 +29,18 @@ async def run_godot_import_check(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except TimeoutError:
-        process.kill()
-        stdout, stderr = await process.communicate()
+    stdout_task = asyncio.create_task(process.stdout.read())
+    stderr_task = asyncio.create_task(process.stderr.read())
+    with suppress(TimeoutError):
+        await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+
+    if process.returncode is None:
+        # The child can exit between the returncode check and kill(). Treat that
+        # race as normal instead of replacing the timeout result with
+        # ProcessLookupError.
+        with suppress(ProcessLookupError):
+            process.kill()
+        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
         stdout_path.write_bytes(stdout)
         stderr_path.write_bytes(stderr)
         return GodotImportResult(
@@ -43,6 +51,7 @@ async def run_godot_import_check(
             safe_details="Godot import check timed out.",
         )
 
+    stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
     stdout_path.write_bytes(stdout)
     stderr_path.write_bytes(stderr)
     return GodotImportResult(

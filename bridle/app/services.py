@@ -46,6 +46,7 @@ class BridleAppService:
     @classmethod
     def create(cls, db_path: Path) -> BridleAppService:
         store = SQLiteJobStore(db_path)
+        store.recover_interrupted_jobs()
         events = JobEventBroker(store)
         orchestrator = AsyncTaskOrchestrator(store, events)
         return cls(store=store, events=events, orchestrator=orchestrator)

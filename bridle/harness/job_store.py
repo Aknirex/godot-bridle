@@ -211,6 +211,45 @@ class SQLiteJobStore:
         self._conn.commit()
         return updated
 
+    def recover_interrupted_jobs(self) -> list[JobStatus]:
+        terminal_states = (
+            JobState.SUCCEEDED.value,
+            JobState.FAILED.value,
+            JobState.CANCELLED.value,
+        )
+        rows = self._conn.execute(
+            "SELECT * FROM jobs WHERE state NOT IN (?, ?, ?)", terminal_states
+        ).fetchall()
+        recovered: list[JobStatus] = []
+        for row in rows:
+            current = _status_from_row(row)
+            if current.state == JobState.CANCEL_REQUESTED:
+                status = self.update_job(current.job_id, JobState.CANCELLED)
+                self.append_event(
+                    current.job_id,
+                    "job.cancelled",
+                    "Job cancellation completed after application restart",
+                )
+            else:
+                details = "Job was interrupted because the application stopped."
+                status = self.update_job(
+                    current.job_id,
+                    JobState.FAILED,
+                    error_code="sidecar_interrupted",
+                    safe_details=details,
+                )
+                self.append_event(
+                    current.job_id,
+                    "job.failed",
+                    "Job was interrupted",
+                    payload={
+                        "error_code": "sidecar_interrupted",
+                        "safe_details": details,
+                    },
+                )
+            recovered.append(status)
+        return recovered
+
     def append_event(
         self,
         job_id: str,

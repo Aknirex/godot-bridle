@@ -54,6 +54,30 @@ def test_job_store_persists_status_updates(tmp_path) -> None:
         store.close()
 
 
+def test_job_store_recovers_interrupted_jobs_to_diagnostic_terminal_states(tmp_path) -> None:
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    try:
+        running = store.create_job("character_gen", job_id="job_running")
+        cancelling = store.create_job("character_gen", job_id="job_cancelling")
+        succeeded = store.create_job("character_gen", job_id="job_succeeded")
+        store.update_job(running.job_id, JobState.WAITING_PROVIDER, progress=0.25)
+        store.update_job(cancelling.job_id, JobState.CANCEL_REQUESTED)
+        store.update_job(succeeded.job_id, JobState.SUCCEEDED, progress=1.0)
+
+        recovered = store.recover_interrupted_jobs()
+
+        assert {job.job_id for job in recovered} == {running.job_id, cancelling.job_id}
+        interrupted = store.get_job(running.job_id)
+        assert interrupted.state == JobState.FAILED
+        assert interrupted.error_code == "sidecar_interrupted"
+        assert store.replay_events(running.job_id)[-1].type == "job.failed"
+        assert store.get_job(cancelling.job_id).state == JobState.CANCELLED
+        assert store.replay_events(cancelling.job_id)[-1].type == "job.cancelled"
+        assert store.get_job(succeeded.job_id).state == JobState.SUCCEEDED
+    finally:
+        store.close()
+
+
 def test_job_store_persists_generated_asset_record(tmp_path) -> None:
     project = tmp_path / "game"
     project.mkdir()
