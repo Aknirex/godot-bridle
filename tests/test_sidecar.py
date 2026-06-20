@@ -5,6 +5,7 @@ from typing import Any
 
 from bridle.app.services import BridleAppService
 from bridle.app.sidecar import JsonRpcSidecar
+from bridle.domain.providers import LlmChatResponse
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator
@@ -12,6 +13,11 @@ from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
 from bridle.knowledge.embeddings import DeterministicEmbeddingProvider
 from bridle.knowledge.service import ProjectKnowledgeService
 from bridle.knowledge.vector_store import InMemoryVectorStore
+
+
+class FakeKnowledgeAnswerProvider:
+    async def chat(self, request):
+        return LlmChatResponse(content="Player speed is 10. [S1]")
 
 
 async def make_sidecar(tmp_path):
@@ -89,9 +95,14 @@ async def test_sidecar_lists_and_tests_providers(tmp_path) -> None:
             '{"jsonrpc":"2.0","id":2,"method":"test_provider",'
             '"params":{"provider_id":"meshy_mock"}}'
         )
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":3,"method":"test_provider",'
+            '"params":{"provider_id":"openai_embedding"}}'
+        )
 
-        assert written[-2]["result"][0]["provider_id"] == "deepseek"
-        assert written[-1]["result"]["status"] == "ok"
+        assert written[-3]["result"][0]["provider_id"] == "deepseek"
+        assert written[-2]["result"]["status"] == "ok"
+        assert written[-1]["result"]["status"] == "missing_key"
     finally:
         await sidecar.stop()
 
@@ -127,7 +138,11 @@ async def test_sidecar_submit_workflow_and_stream_events(tmp_path) -> None:
         await sidecar.stop()
 
 
-async def test_sidecar_indexes_and_queries_project_knowledge(tmp_path) -> None:
+async def test_sidecar_indexes_and_queries_project_knowledge(tmp_path, monkeypatch) -> None:
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr("bridle.knowledge.service.asyncio.to_thread", run_inline)
     project = tmp_path / "game"
     project.mkdir()
     (project / "project.godot").write_text('config/name="Demo"\n', encoding="utf-8")
@@ -140,6 +155,7 @@ async def test_sidecar_indexes_and_queries_project_knowledge(tmp_path) -> None:
         SQLiteKnowledgeCatalog(tmp_path / "knowledge.sqlite3"),
         DeterministicEmbeddingProvider(),
         InMemoryVectorStore(),
+        answer_provider=FakeKnowledgeAnswerProvider(),
     )
     sidecar.service._knowledge_services[project.resolve()] = knowledge  # noqa: SLF001
     try:
@@ -163,6 +179,16 @@ async def test_sidecar_indexes_and_queries_project_knowledge(tmp_path) -> None:
         )
 
         assert written[-1]["result"][0]["citation"].startswith("res://player.gd:")
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":3,"method":"ask_project_knowledge",'
+            f'"params":{{"project_path":"{project.as_posix()}",'
+            '"question":"What is the player speed?","top_k":2}}'
+        )
+
+        assert written[-1]["result"]["answer"] == "Player speed is 10. [S1]"
+        assert written[-1]["result"]["citations"][0]["citation"].startswith(
+            "res://player.gd:"
+        )
     finally:
         await sidecar.stop()
 

@@ -122,6 +122,7 @@ Bridle 被确认定位为：
 - `llm.chat`
 - `llm.stream`
 - `llm.structured_output`
+- `embedding.generate`
 - `model3d.text_to_3d`
 - `model3d.image_to_3d`
 - `texture.retexture`

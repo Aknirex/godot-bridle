@@ -21,6 +21,8 @@ uv run bridle sidecar
 
 The Tauri v2 desktop MVP lives in `desktop/`. Development and packaging instructions are in
 [`docs/09-alpha-development-and-packaging.md`](docs/09-alpha-development-and-packaging.md).
+Deferred release validation and the ordered next-development plan are tracked in
+[`docs/10-validation-debt-and-next-development-plan.md`](docs/10-validation-debt-and-next-development-plan.md).
 
 ## Roadmap
 

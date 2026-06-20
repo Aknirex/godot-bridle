@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from bridle.domain.assets import DownloadedAsset, GeneratedAssetRecord
+from bridle.domain.assets import DownloadedAsset, GeneratedAssetRecord, GodotImportResult
 from bridle.domain.errors import ConfigError, ProviderError
 from bridle.domain.jobs import JobState
 from bridle.domain.providers import (
@@ -27,6 +27,7 @@ from bridle.godot.glb import inspect_glb
 from bridle.godot.import_pipeline import prepare_godot_asset_files
 from bridle.godot.project import detect_project, generated_asset_dir
 from bridle.harness.task_orchestrator import JobContext
+from bridle.knowledge.documents import KnowledgeAnswer
 
 
 class AssetProvider(Protocol):
@@ -50,9 +51,11 @@ class CharacterGenerationRequest(BaseModel):
     poll_timeout_seconds: float = Field(default=300.0, gt=0)
     max_retries: int = Field(default=2, ge=0, le=5)
     enhance_prompt: bool = False
+    diagnosis_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
 
 
 DownloadFunction = Callable[..., Awaitable[DownloadedAsset]]
+ImportDiagnoser = Callable[[Path, GodotImportResult], Awaitable[KnowledgeAnswer]]
 
 
 class CharacterGenerationWorkflow:
@@ -78,11 +81,13 @@ class CharacterGenerationWorkflow:
         *,
         llm_provider: LlmProvider | None = None,
         downloader: DownloadFunction = download_asset,
+        import_diagnoser: ImportDiagnoser | None = None,
     ) -> None:
         self.request = request
         self.provider = provider
         self.llm_provider = llm_provider
         self.downloader = downloader
+        self.import_diagnoser = import_diagnoser
         self.asset_id = f"asset_{uuid4().hex}"
 
     async def run(self, context: JobContext) -> GeneratedAssetRecord:
@@ -169,6 +174,7 @@ class CharacterGenerationWorkflow:
                 logs_dir=record.manifest_path.parent / "logs",
             )
             if not import_result.success:
+                await self._diagnose_import_failure(context, project_root, import_result)
                 raise ConfigError(import_result.safe_details)
         else:
             await context.emit(
@@ -194,6 +200,43 @@ class CharacterGenerationWorkflow:
             },
         )
         return record
+
+    async def _diagnose_import_failure(
+        self,
+        context: JobContext,
+        project_root: Path,
+        import_result: GodotImportResult,
+    ) -> None:
+        if self.import_diagnoser is None:
+            return
+        try:
+            diagnosis = await asyncio.wait_for(
+                self.import_diagnoser(project_root, import_result),
+                timeout=self.request.diagnosis_timeout_seconds,
+            )
+        except Exception:
+            await context.emit(
+                "knowledge.diagnosis.failed",
+                "Knowledge diagnosis was unavailable; the original import error is unchanged",
+                stage="run_godot_import_check",
+                payload={"exit_code": import_result.exit_code},
+            )
+            return
+
+        await context.emit(
+            "knowledge.diagnosis.completed",
+            "Knowledge diagnosis completed for the Godot import failure",
+            stage="run_godot_import_check",
+            payload={
+                "exit_code": import_result.exit_code,
+                "suggestion": diagnosis.answer,
+                "citations": [
+                    citation.model_dump(mode="json") for citation in diagnosis.citations
+                ],
+                "latency_ms": diagnosis.latency_ms,
+                "warnings": diagnosis.warnings,
+            },
+        )
 
     async def _stage(
         self,

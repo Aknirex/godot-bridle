@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from bridle import __version__
 from bridle.config.key_resolver import KeyResolver
+from bridle.domain.assets import GodotImportResult
 from bridle.domain.capabilities import ProviderCapability
 from bridle.domain.errors import ConfigError, ProviderCapabilityError
 from bridle.domain.events import JsonValue
@@ -28,10 +29,11 @@ from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
 from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
 from bridle.knowledge.chroma_store import ChromaVectorStore
-from bridle.knowledge.documents import RetrievalHit
-from bridle.knowledge.embeddings import DeterministicEmbeddingProvider
+from bridle.knowledge.documents import KnowledgeAnswer, RetrievalHit
 from bridle.knowledge.service import ProjectKnowledgeService
 from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
+from bridle.providers.embedding_litellm import LiteLlmEmbeddingProvider
+from bridle.providers.resolver import ProviderResolver
 
 
 class BridleAppService:
@@ -86,6 +88,8 @@ class BridleAppService:
 
     async def test_provider(self, provider_id: str) -> ProviderHealth:
         provider = self._provider_by_id(provider_id)
+        if ProviderCapability.EMBEDDING_GENERATE in provider.capabilities:
+            return await LiteLlmEmbeddingProvider(provider, self.key_resolver).test_connection()
         if provider.kind == ProviderKind.LLM:
             from bridle.providers.llm_litellm import LiteLlmProvider
 
@@ -126,6 +130,7 @@ class BridleAppService:
                 request,
                 provider,
                 llm_provider=llm_provider,
+                import_diagnoser=self._diagnose_import_failure,
             )
             return await self.orchestrator.submit(workflow_id, workflow.run)
 
@@ -187,6 +192,40 @@ class BridleAppService:
         except ValueError as error:
             raise ConfigError(str(error)) from error
 
+    async def ask_project_knowledge(
+        self,
+        project_path: str,
+        question: str,
+        *,
+        top_k: int = 5,
+        filters: dict[str, JsonValue] | None = None,
+    ) -> KnowledgeAnswer:
+        if not 1 <= top_k <= 20:
+            raise ConfigError("Knowledge query top_k must be between 1 and 20.")
+        root = Path(project_path).resolve()
+        detect_project(root)
+        knowledge = await self._knowledge_for(root)
+        try:
+            return await knowledge.ask_project(question, top_k=top_k, filters=filters)
+        except ValueError as error:
+            raise ConfigError(str(error)) from error
+
+    async def _diagnose_import_failure(
+        self,
+        project_root: Path,
+        import_result: GodotImportResult,
+    ) -> KnowledgeAnswer:
+        knowledge = await self._knowledge_for(project_root)
+        await knowledge.index_project(project_root)
+        log_excerpt = _import_log_excerpt(import_result)
+        question = (
+            "Diagnose this Godot import failure using only the indexed project and diagnostic "
+            f"sources. Error: {import_result.safe_details} Exit code: {import_result.exit_code}."
+        )
+        if log_excerpt:
+            question += f" Log excerpt:\n{log_excerpt}"
+        return await knowledge.ask_project(question, top_k=5)
+
     async def _knowledge_for(self, project_root: Path) -> ProjectKnowledgeService:
         root = project_root.resolve()
         existing = self._knowledge_services.get(root)
@@ -196,11 +235,26 @@ class BridleAppService:
             existing = self._knowledge_services.get(root)
             if existing is not None:
                 return existing
+            embedding_config = (
+                ProviderResolver(self.providers)
+                .resolve([ProviderCapability.EMBEDDING_GENERATE])
+                .provider_for(ProviderCapability.EMBEDDING_GENERATE)
+            )
+            embeddings = LiteLlmEmbeddingProvider(embedding_config, self.key_resolver)
+            llm_config = (
+                ProviderResolver(self.providers)
+                .resolve([ProviderCapability.LLM_CHAT])
+                .provider_for(ProviderCapability.LLM_CHAT)
+            )
+            from bridle.providers.llm_litellm import LiteLlmProvider
+
+            answer_provider = LiteLlmProvider(llm_config, self.key_resolver)
             try:
                 vector_store = await asyncio.to_thread(
                     ChromaVectorStore,
                     self.store.db_path.parent / "knowledge-vectors",
                     root,
+                    embedding_identity=embeddings.index_identity,
                 )
             except RuntimeError as error:
                 raise ConfigError(str(error)) from error
@@ -209,8 +263,10 @@ class BridleAppService:
                     self.store.db_path,
                     connection=self.store.connection,
                 ),
-                DeterministicEmbeddingProvider(),
+                embeddings,
                 vector_store,
+                index_identity=embeddings.index_identity,
+                answer_provider=answer_provider,
             )
             self._knowledge_services[root] = knowledge
             return knowledge
@@ -234,6 +290,15 @@ def default_provider_configs() -> list[ProviderConfig]:
             default_for=[ProviderCapability.LLM_CHAT, ProviderCapability.LLM_STREAM],
         ),
         ProviderConfig(
+            provider_id="openai_embedding",
+            kind=ProviderKind.LLM,
+            backend="litellm",
+            model="text-embedding-3-small",
+            api_key_env="OPENAI_API_KEY",
+            capabilities=[ProviderCapability.EMBEDDING_GENERATE],
+            default_for=[ProviderCapability.EMBEDDING_GENERATE],
+        ),
+        ProviderConfig(
             provider_id="meshy_mock",
             kind=ProviderKind.ASSET,
             backend="mock_meshy",
@@ -248,3 +313,15 @@ def default_provider_configs() -> list[ProviderConfig]:
             capabilities=[ProviderCapability.MODEL3D_TEXT_TO_3D],
         ),
     ]
+
+
+def _import_log_excerpt(import_result: GodotImportResult, limit: int = 4_000) -> str:
+    excerpts: list[str] = []
+    for path in (import_result.stderr_path, import_result.stdout_path):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if text:
+            excerpts.append(text)
+    return "\n".join(excerpts)[:limit]

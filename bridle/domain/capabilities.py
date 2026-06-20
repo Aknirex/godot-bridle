@@ -9,6 +9,7 @@ class ProviderCapability(StrEnum):
     LLM_CHAT = "llm.chat"
     LLM_STREAM = "llm.stream"
     LLM_STRUCTURED_OUTPUT = "llm.structured_output"
+    EMBEDDING_GENERATE = "embedding.generate"
     MODEL3D_TEXT_TO_3D = "model3d.text_to_3d"
     MODEL3D_IMAGE_TO_3D = "model3d.image_to_3d"
     TEXTURE_RETEXTURE = "texture.retexture"

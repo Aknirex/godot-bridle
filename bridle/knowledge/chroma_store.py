@@ -17,6 +17,7 @@ class ChromaVectorStore:
         storage_dir: Path,
         project_root: Path,
         *,
+        embedding_identity: str = "default",
         client: Any | None = None,
     ) -> None:
         if client is None:
@@ -29,8 +30,9 @@ class ChromaVectorStore:
             storage_dir.mkdir(parents=True, exist_ok=True)
             client = chromadb.PersistentClient(path=str(storage_dir))
         project_hash = hashlib.sha256(str(project_root.resolve()).encode()).hexdigest()[:24]
+        embedding_hash = hashlib.sha256(embedding_identity.encode()).hexdigest()[:12]
         self._collection = client.get_or_create_collection(
-            name=f"bridle_{project_hash}",
+            name=f"bridle_{project_hash}_{embedding_hash}",
             metadata={"hnsw:space": "cosine"},
         )
 

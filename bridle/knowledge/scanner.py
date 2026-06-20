@@ -9,7 +9,7 @@ from bridle.domain.errors import ConfigError
 from bridle.godot.project import detect_project
 from bridle.knowledge.documents import KnowledgeDocument, KnowledgeSourceType
 
-INDEXABLE_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".md", ".json"})
+INDEXABLE_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".md", ".json", ".log"})
 EXCLUDED_DIRECTORIES = frozenset({".git", ".godot", ".import", "node_modules", "target"})
 DEFAULT_MAX_FILE_BYTES = 1_000_000
 PROJECT_IDENTITY_PATH = Path("bridle") / ".project_id"
@@ -50,10 +50,11 @@ def scan_godot_project(
             warnings.append(f"Could not read UTF-8 file: {relative.as_posix()}")
             continue
         res_path = f"res://{relative.as_posix()}"
+        source_type = _source_type_for(relative)
         documents.append(
             KnowledgeDocument(
                 source_id=_source_id(project_id, relative),
-                source_type=KnowledgeSourceType.GODOT_PROJECT,
+                source_type=source_type,
                 project_root=root,
                 path=path,
                 title=relative.name,
@@ -69,6 +70,14 @@ def scan_godot_project(
     if not documents:
         raise ConfigError("Godot project did not contain any indexable text files.")
     return documents, warnings
+
+
+def _source_type_for(relative: Path) -> KnowledgeSourceType:
+    if relative.suffix.lower() == ".log":
+        return KnowledgeSourceType.BRIDLE_JOB
+    if relative.name == "bridle_asset.json":
+        return KnowledgeSourceType.ASSET_REPORT
+    return KnowledgeSourceType.GODOT_PROJECT
 
 
 def _source_id(project_id: str, relative: Path) -> str:

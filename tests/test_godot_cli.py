@@ -50,6 +50,7 @@ async def test_run_godot_import_check_reports_nonzero_exit(tmp_path) -> None:
 
     assert not result.success
     assert result.exit_code == 3
+    assert result.safe_details == "Godot import check failed with exit code 3."
     assert result.stderr_path.read_text(encoding="utf-8").strip() == "invalid asset"
 
 

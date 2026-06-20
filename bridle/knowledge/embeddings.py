@@ -7,6 +7,9 @@ from typing import Protocol
 
 
 class EmbeddingProvider(Protocol):
+    @property
+    def index_identity(self) -> str: ...
+
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
@@ -17,6 +20,10 @@ class DeterministicEmbeddingProvider:
         if dimensions < 1:
             raise ValueError("Embedding dimensions must be positive.")
         self.dimensions = dimensions
+
+    @property
+    def index_identity(self) -> str:
+        return f"deterministic-v1-{self.dimensions}"
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._embed_one(text) for text in texts]

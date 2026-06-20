@@ -38,7 +38,13 @@ class SQLiteKnowledgeCatalog:
         ).fetchall()
         return {str(row[0]): str(row[1]) for row in rows}
 
-    def replace(self, document: KnowledgeDocument, chunks: list[KnowledgeChunk]) -> None:
+    def replace(
+        self,
+        document: KnowledgeDocument,
+        chunks: list[KnowledgeChunk],
+        *,
+        index_identity: str | None = None,
+    ) -> None:
         if document.project_root is None:
             raise ValueError("Indexed project document must have project_root.")
         with self._conn:
@@ -55,7 +61,7 @@ class SQLiteKnowledgeCatalog:
                     str(document.project_root.resolve()),
                     document.source_type.value,
                     str(document.path) if document.path else None,
-                    document.content_hash,
+                    _indexed_content_hash(document.content_hash, index_identity),
                     len(chunks),
                     datetime.now(UTC).isoformat(),
                 ),
@@ -92,3 +98,9 @@ class SQLiteKnowledgeCatalog:
             (str(project_root.resolve()),),
         ).fetchone()
         return int(row[0])
+
+
+def _indexed_content_hash(content_hash: str, index_identity: str | None) -> str:
+    if index_identity is None:
+        return content_hash
+    return f"{index_identity}:{content_hash}"

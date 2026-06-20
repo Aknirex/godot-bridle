@@ -5,6 +5,7 @@ import shutil
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
 from bridle.knowledge.chunking import chunk_document
+from bridle.knowledge.documents import KnowledgeSourceType
 from bridle.knowledge.indexer import index_godot_project
 from bridle.knowledge.scanner import scan_godot_project
 
@@ -61,6 +62,24 @@ def test_source_ids_remain_stable_when_project_moves(tmp_path) -> None:
 
     assert after_ids == before_ids
     assert (moved / "bridle" / ".project_id").is_file()
+
+
+def test_scanner_classifies_import_logs_and_asset_manifests(tmp_path) -> None:
+    project = make_project(tmp_path)
+    asset_dir = project / "bridle" / "generated" / "asset_one"
+    logs_dir = asset_dir / "logs"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "godot_import_stderr.log").write_text(
+        "invalid mesh resource",
+        encoding="utf-8",
+    )
+    (asset_dir / "bridle_asset.json").write_text("{}", encoding="utf-8")
+
+    documents, _ = scan_godot_project(project)
+    types = {document.path.name: document.source_type for document in documents}
+
+    assert types["godot_import_stderr.log"] == KnowledgeSourceType.BRIDLE_JOB
+    assert types["bridle_asset.json"] == KnowledgeSourceType.ASSET_REPORT
 
 
 def test_knowledge_catalog_uses_wal_journal_mode(tmp_path) -> None:

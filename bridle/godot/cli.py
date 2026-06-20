@@ -59,5 +59,9 @@ async def run_godot_import_check(
         exit_code=process.returncode or 0,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
-        safe_details="Godot import check completed.",
+        safe_details=(
+            "Godot import check completed."
+            if process.returncode == 0
+            else f"Godot import check failed with exit code {process.returncode}."
+        ),
     )

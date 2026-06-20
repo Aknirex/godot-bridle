@@ -1,6 +1,8 @@
 from bridle.knowledge.chroma_store import ChromaVectorStore
 from bridle.knowledge.documents import (
+    KnowledgeAnswer,
     KnowledgeChunk,
+    KnowledgeCitation,
     KnowledgeDocument,
     KnowledgeIndexSummary,
     KnowledgeSourceType,
@@ -16,6 +18,8 @@ __all__ = [
     "EmbeddingProvider",
     "InMemoryVectorStore",
     "KnowledgeChunk",
+    "KnowledgeAnswer",
+    "KnowledgeCitation",
     "KnowledgeDocument",
     "KnowledgeIndexSummary",
     "KnowledgeSourceType",

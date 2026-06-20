@@ -58,3 +58,20 @@ class RetrievalHit(BaseModel):
     score: float
     citation: str
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class KnowledgeCitation(BaseModel):
+    label: str
+    chunk_id: str
+    source_id: str
+    citation: str
+    score: float
+
+
+class KnowledgeAnswer(BaseModel):
+    question: str
+    answer: str
+    citations: list[KnowledgeCitation] = Field(default_factory=list)
+    retrieval_hits: list[RetrievalHit] = Field(default_factory=list)
+    latency_ms: int = 0
+    warnings: list[str] = Field(default_factory=list)

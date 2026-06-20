@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from bridle.app.services import BridleAppService
+from bridle.domain.assets import GodotImportResult
 from bridle.domain.jobs import JobState
 from bridle.harness.character_workflow import CharacterGenerationWorkflow
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator
+from bridle.knowledge.documents import KnowledgeAnswer, KnowledgeCitation
 
 
 async def wait_for_terminal_state(
@@ -85,5 +88,183 @@ async def test_character_workflow_honors_cancellation(tmp_path) -> None:
     try:
         status = await wait_for_terminal_state(orchestrator, ref.job_id)
         assert status.state == JobState.CANCELLED
+    finally:
+        await service.stop()
+
+
+async def test_import_failure_emits_cited_diagnosis_without_changing_error(
+    tmp_path, monkeypatch
+) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+    (project / "project.godot").write_text('[application]\nconfig/name="Demo"\n')
+    stderr_path = tmp_path / "stderr.log"
+    stdout_path = tmp_path / "stdout.log"
+    stderr_path.write_text("invalid mesh resource", encoding="utf-8")
+    stdout_path.write_text("", encoding="utf-8")
+
+    async def failed_import_check(**kwargs):
+        return GodotImportResult(
+            success=False,
+            exit_code=3,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            safe_details="Godot import check failed with exit code 3.",
+        )
+
+    async def diagnose(project_root, import_result):
+        return KnowledgeAnswer(
+            question="diagnose",
+            answer="Check the imported mesh path. [S1]",
+            citations=[
+                KnowledgeCitation(
+                    label="S1",
+                    chunk_id="chunk-log",
+                    source_id="source-log",
+                    citation="res://bridle/generated/asset/logs/godot_import_stderr.log:1-1",
+                    score=0.9,
+                )
+            ],
+            latency_ms=4,
+        )
+
+    monkeypatch.setattr(
+        "bridle.harness.character_workflow.run_godot_import_check",
+        failed_import_check,
+    )
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    events = JobEventBroker(store)
+    orchestrator = AsyncTaskOrchestrator(store, events)
+    service = BridleAppService(store, events, orchestrator)
+    monkeypatch.setattr(service, "_diagnose_import_failure", diagnose)
+    await service.start()
+    try:
+        ref = await service.submit_workflow(
+            {
+                "workflow_id": "character_gen",
+                "project_path": str(project),
+                "prompt": "low-poly knight",
+                "provider_id": "meshy_mock",
+                "godot_executable": str(Path("unused")),
+                "poll_interval_seconds": 0,
+            }
+        )
+        status = await wait_for_terminal_state(orchestrator, ref.job_id)
+        history = store.replay_events(ref.job_id)
+        diagnosis = next(
+            event for event in history if event.type == "knowledge.diagnosis.completed"
+        )
+
+        assert status.state == JobState.FAILED
+        assert status.error_code == "config_error"
+        assert status.safe_details == "Godot import check failed with exit code 3."
+        assert diagnosis.payload["suggestion"] == "Check the imported mesh path. [S1]"
+        assert diagnosis.payload["citations"][0]["label"] == "S1"
+        assert [event.type for event in history].index("knowledge.diagnosis.completed") < [
+            event.type for event in history
+        ].index("job.failed")
+    finally:
+        await service.stop()
+
+
+async def test_diagnosis_failure_keeps_original_import_failure(tmp_path, monkeypatch) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+    (project / "project.godot").write_text("[application]\n", encoding="utf-8")
+
+    async def failed_import_check(**kwargs):
+        log = tmp_path / "import.log"
+        log.write_text("broken import", encoding="utf-8")
+        return GodotImportResult(
+            success=False,
+            exit_code=7,
+            stdout_path=log,
+            stderr_path=log,
+            safe_details="original import failure",
+        )
+
+    async def broken_diagnosis(project_root, import_result):
+        raise RuntimeError("diagnosis backend failed")
+
+    monkeypatch.setattr(
+        "bridle.harness.character_workflow.run_godot_import_check",
+        failed_import_check,
+    )
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    events = JobEventBroker(store)
+    orchestrator = AsyncTaskOrchestrator(store, events)
+    service = BridleAppService(store, events, orchestrator)
+    monkeypatch.setattr(service, "_diagnose_import_failure", broken_diagnosis)
+    await service.start()
+    try:
+        ref = await service.submit_workflow(
+            {
+                "workflow_id": "character_gen",
+                "project_path": str(project),
+                "prompt": "knight",
+                "provider_id": "meshy_mock",
+                "godot_executable": "unused",
+                "poll_interval_seconds": 0,
+            }
+        )
+        status = await wait_for_terminal_state(orchestrator, ref.job_id)
+        history = store.replay_events(ref.job_id)
+
+        assert status.error_code == "config_error"
+        assert status.safe_details == "original import failure"
+        assert any(event.type == "knowledge.diagnosis.failed" for event in history)
+    finally:
+        await service.stop()
+
+
+async def test_diagnosis_timeout_does_not_delay_original_failure(tmp_path, monkeypatch) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+    (project / "project.godot").write_text("[application]\n", encoding="utf-8")
+
+    async def failed_import_check(**kwargs):
+        log = tmp_path / "timeout-import.log"
+        log.write_text("broken import", encoding="utf-8")
+        return GodotImportResult(
+            success=False,
+            exit_code=9,
+            stdout_path=log,
+            stderr_path=log,
+            safe_details="timed diagnosis original failure",
+        )
+
+    async def slow_diagnosis(project_root, import_result):
+        await asyncio.sleep(1)
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(
+        "bridle.harness.character_workflow.run_godot_import_check",
+        failed_import_check,
+    )
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    events = JobEventBroker(store)
+    orchestrator = AsyncTaskOrchestrator(store, events)
+    service = BridleAppService(store, events, orchestrator)
+    monkeypatch.setattr(service, "_diagnose_import_failure", slow_diagnosis)
+    await service.start()
+    try:
+        ref = await service.submit_workflow(
+            {
+                "workflow_id": "character_gen",
+                "project_path": str(project),
+                "prompt": "knight",
+                "provider_id": "meshy_mock",
+                "godot_executable": "unused",
+                "poll_interval_seconds": 0,
+                "diagnosis_timeout_seconds": 0.01,
+            }
+        )
+        status = await wait_for_terminal_state(orchestrator, ref.job_id)
+
+        assert status.safe_details == "timed diagnosis original failure"
+        assert any(
+            event.type == "knowledge.diagnosis.failed"
+            for event in store.replay_events(ref.job_id)
+        )
     finally:
         await service.stop()

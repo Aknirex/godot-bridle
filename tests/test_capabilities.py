@@ -8,6 +8,7 @@ def test_capability_values_match_adr_005() -> None:
         "llm.chat",
         "llm.stream",
         "llm.structured_output",
+        "embedding.generate",
         "model3d.text_to_3d",
         "model3d.image_to_3d",
         "texture.retexture",

@@ -15,6 +15,7 @@ async def test_service_lists_default_providers(tmp_path) -> None:
 
         assert [provider["provider_id"] for provider in providers] == [
             "deepseek",
+            "openai_embedding",
             "meshy_mock",
             "meshy",
         ]
@@ -53,6 +54,18 @@ async def test_service_tests_deepseek_as_missing_key_by_default(tmp_path) -> Non
     service = BridleAppService(store, events, AsyncTaskOrchestrator(store, events))
     try:
         health = await service.test_provider("deepseek")
+
+        assert health.status == "missing_key"
+    finally:
+        store.close()
+
+
+async def test_service_tests_embedding_provider_as_missing_key_by_default(tmp_path) -> None:
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    events = JobEventBroker(store)
+    service = BridleAppService(store, events, AsyncTaskOrchestrator(store, events))
+    try:
+        health = await service.test_provider("openai_embedding")
 
         assert health.status == "missing_key"
     finally:

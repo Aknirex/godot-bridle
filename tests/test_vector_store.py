@@ -110,6 +110,26 @@ async def test_chroma_adapter_round_trips_chunks_without_installed_chromadb(tmp_
     assert all(thread_id != event_loop_thread for thread_id in client.collection.worker_threads)
 
 
+def test_chroma_collection_isolated_by_embedding_identity(tmp_path) -> None:
+    first_client = FakeClient()
+    second_client = FakeClient()
+
+    ChromaVectorStore(
+        tmp_path / "vectors",
+        tmp_path / "game",
+        embedding_identity="model-a",
+        client=first_client,
+    )
+    ChromaVectorStore(
+        tmp_path / "vectors",
+        tmp_path / "game",
+        embedding_identity="model-b",
+        client=second_client,
+    )
+
+    assert first_client.name != second_client.name
+
+
 async def test_chroma_adapter_persists_vectors_locally(tmp_path) -> None:
     pytest.importorskip("chromadb")
     storage = tmp_path / "vectors"
