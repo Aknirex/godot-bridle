@@ -7,6 +7,7 @@ from bridle.knowledge.documents import (
     RetrievalHit,
 )
 from bridle.knowledge.embeddings import DeterministicEmbeddingProvider, EmbeddingProvider
+from bridle.knowledge.service import ProjectKnowledgeService
 from bridle.knowledge.vector_store import InMemoryVectorStore, VectorStore
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "KnowledgeDocument",
     "KnowledgeIndexSummary",
     "KnowledgeSourceType",
+    "ProjectKnowledgeService",
     "RetrievalHit",
     "VectorStore",
 ]

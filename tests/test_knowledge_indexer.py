@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 
+from bridle.harness.job_store import SQLiteJobStore
 from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
 from bridle.knowledge.chunking import chunk_document
 from bridle.knowledge.indexer import index_godot_project
@@ -69,6 +70,20 @@ def test_knowledge_catalog_uses_wal_journal_mode(tmp_path) -> None:
         assert mode == "wal"
     finally:
         catalog.close()
+
+
+def test_knowledge_catalog_does_not_close_injected_connection(tmp_path) -> None:
+    store = SQLiteJobStore(tmp_path / "bridle.sqlite3")
+    catalog = SQLiteKnowledgeCatalog(
+        store.db_path,
+        connection=store.connection,
+    )
+    try:
+        catalog.close()
+
+        assert store.connection.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        store.close()
 
 
 def test_indexer_adds_skips_updates_and_deletes_incrementally(tmp_path) -> None:

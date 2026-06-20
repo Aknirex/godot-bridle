@@ -105,6 +105,31 @@ class JsonRpcSidecar:
             if method == "cancel_job":
                 job_id = _required_str(params, "job_id")
                 return _to_jsonable(await self.service.cancel_job(job_id))
+            if method == "index_project_knowledge":
+                path = _required_str(params, "project_path")
+                return _to_jsonable(await self.service.index_project_knowledge(path))
+            if method == "query_project_knowledge":
+                path = _required_str(params, "project_path")
+                question = _required_str(params, "question")
+                try:
+                    top_k = int(params.get("top_k", 5))
+                except (TypeError, ValueError) as error:
+                    raise JsonRpcProtocolError(-32602, "top_k must be an integer") from error
+                if not 1 <= top_k <= 20:
+                    raise JsonRpcProtocolError(
+                        -32602,
+                        "top_k must be between 1 and 20",
+                    )
+                filters = params.get("filters")
+                if filters is not None and not isinstance(filters, dict):
+                    raise JsonRpcProtocolError(-32602, "filters must be an object")
+                hits = await self.service.query_project_knowledge(
+                    path,
+                    question,
+                    top_k=top_k,
+                    filters=filters,
+                )
+                return [_to_jsonable(hit) for hit in hits]
             if method == "stream_job_events":
                 return await self._start_event_stream(params)
         except BridleError as error:

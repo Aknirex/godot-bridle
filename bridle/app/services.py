@@ -9,6 +9,7 @@ from bridle import __version__
 from bridle.config.key_resolver import KeyResolver
 from bridle.domain.capabilities import ProviderCapability
 from bridle.domain.errors import ConfigError, ProviderCapabilityError
+from bridle.domain.events import JsonValue
 from bridle.domain.jobs import JobRef, JobStatus
 from bridle.domain.projects import ProjectSummary
 from bridle.domain.providers import (
@@ -25,6 +26,11 @@ from bridle.harness.character_workflow import (
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
+from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
+from bridle.knowledge.chroma_store import ChromaVectorStore
+from bridle.knowledge.documents import RetrievalHit
+from bridle.knowledge.embeddings import DeterministicEmbeddingProvider
+from bridle.knowledge.service import ProjectKnowledgeService
 from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
 
 
@@ -42,6 +48,8 @@ class BridleAppService:
         self.orchestrator = orchestrator
         self.providers = providers if providers is not None else default_provider_configs()
         self.key_resolver = key_resolver or KeyResolver()
+        self._knowledge_services: dict[Path, ProjectKnowledgeService] = {}
+        self._knowledge_lock = asyncio.Lock()
 
     @classmethod
     def create(cls, db_path: Path) -> BridleAppService:
@@ -56,6 +64,9 @@ class BridleAppService:
 
     async def stop(self) -> None:
         await self.orchestrator.stop()
+        for knowledge in self._knowledge_services.values():
+            knowledge.catalog.close()
+        self._knowledge_services.clear()
         self.store.close()
 
     async def health(self) -> dict[str, str]:
@@ -132,6 +143,77 @@ class BridleAppService:
 
     async def cancel_job(self, job_id: str) -> JobStatus:
         return self.orchestrator.cancel_job(job_id)
+
+    async def index_project_knowledge(self, project_path: str) -> JobRef:
+        root = Path(project_path).resolve()
+        detect_project(root)
+
+        async def handler(context: JobContext) -> None:
+            await context.emit(
+                "knowledge.index.started",
+                "Project knowledge indexing started",
+                progress=0.1,
+            )
+            knowledge = await self._knowledge_for(root)
+            summary = await knowledge.index_project(root)
+            await context.emit(
+                "knowledge.index.completed",
+                "Project knowledge indexing completed",
+                progress=0.95,
+                payload=summary.model_dump(mode="json"),
+            )
+
+        return await self.orchestrator.submit("knowledge.index_project", handler)
+
+    async def query_project_knowledge(
+        self,
+        project_path: str,
+        question: str,
+        *,
+        top_k: int = 5,
+        filters: dict[str, JsonValue] | None = None,
+    ) -> list[RetrievalHit]:
+        if not 1 <= top_k <= 20:
+            raise ConfigError("Knowledge query top_k must be between 1 and 20.")
+        root = Path(project_path).resolve()
+        detect_project(root)
+        knowledge = await self._knowledge_for(root)
+        try:
+            return await knowledge.query_project(
+                question,
+                top_k=top_k,
+                filters=filters,
+            )
+        except ValueError as error:
+            raise ConfigError(str(error)) from error
+
+    async def _knowledge_for(self, project_root: Path) -> ProjectKnowledgeService:
+        root = project_root.resolve()
+        existing = self._knowledge_services.get(root)
+        if existing is not None:
+            return existing
+        async with self._knowledge_lock:
+            existing = self._knowledge_services.get(root)
+            if existing is not None:
+                return existing
+            try:
+                vector_store = await asyncio.to_thread(
+                    ChromaVectorStore,
+                    self.store.db_path.parent / "knowledge-vectors",
+                    root,
+                )
+            except RuntimeError as error:
+                raise ConfigError(str(error)) from error
+            knowledge = ProjectKnowledgeService(
+                SQLiteKnowledgeCatalog(
+                    self.store.db_path,
+                    connection=self.store.connection,
+                ),
+                DeterministicEmbeddingProvider(),
+                vector_store,
+            )
+            self._knowledge_services[root] = knowledge
+            return knowledge
 
     def _provider_by_id(self, provider_id: str) -> ProviderConfig:
         for provider in self.providers:

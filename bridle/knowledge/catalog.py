@@ -10,16 +10,26 @@ from bridle.storage.database import migrate_database
 
 
 class SQLiteKnowledgeCatalog:
-    def __init__(self, db_path: Path | str) -> None:
+    def __init__(
+        self,
+        db_path: Path | str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        migrate_database(self._conn, self.db_path)
+        self._owns_connection = connection is None
+        if connection is None:
+            connection = sqlite3.connect(self.db_path)
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA foreign_keys=ON")
+            migrate_database(connection, self.db_path)
+        # Injected connections remain caller-owned and must already be configured and migrated.
+        self._conn = connection
 
     def close(self) -> None:
-        self._conn.close()
+        if self._owns_connection:
+            self._conn.close()
 
     def hashes_for_project(self, project_root: Path) -> dict[str, str]:
         rows = self._conn.execute(

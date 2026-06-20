@@ -33,6 +33,10 @@ class SQLiteJobStore:
     def close(self) -> None:
         self._conn.close()
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        return self._conn
+
     def migrate(self) -> None:
         migrate_database(self._conn, self.db_path)
 

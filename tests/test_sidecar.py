@@ -8,6 +8,10 @@ from bridle.app.sidecar import JsonRpcSidecar
 from bridle.harness.event_bus import JobEventBroker
 from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator
+from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
+from bridle.knowledge.embeddings import DeterministicEmbeddingProvider
+from bridle.knowledge.service import ProjectKnowledgeService
+from bridle.knowledge.vector_store import InMemoryVectorStore
 
 
 async def make_sidecar(tmp_path):
@@ -123,6 +127,46 @@ async def test_sidecar_submit_workflow_and_stream_events(tmp_path) -> None:
         await sidecar.stop()
 
 
+async def test_sidecar_indexes_and_queries_project_knowledge(tmp_path) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+    (project / "project.godot").write_text('config/name="Demo"\n', encoding="utf-8")
+    (project / "player.gd").write_text(
+        "func move():\n    var speed = 10\n",
+        encoding="utf-8",
+    )
+    sidecar, written = await make_sidecar(tmp_path / "state")
+    knowledge = ProjectKnowledgeService(
+        SQLiteKnowledgeCatalog(tmp_path / "knowledge.sqlite3"),
+        DeterministicEmbeddingProvider(),
+        InMemoryVectorStore(),
+    )
+    sidecar.service._knowledge_services[project.resolve()] = knowledge  # noqa: SLF001
+    try:
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":1,"method":"index_project_knowledge",'
+            f'"params":{{"project_path":"{project.as_posix()}"}}}}'
+        )
+        job_id = written[-1]["result"]["job_id"]
+        deadline = asyncio.get_running_loop().time() + 2
+        while asyncio.get_running_loop().time() < deadline:
+            status = await sidecar.service.get_job_status(job_id)
+            if status.state.value == "succeeded":
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("Knowledge indexing did not complete")
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":2,"method":"query_project_knowledge",'
+            f'"params":{{"project_path":"{project.as_posix()}",'
+            '"question":"player movement speed","top_k":2}}'
+        )
+
+        assert written[-1]["result"][0]["citation"].startswith("res://player.gd:")
+    finally:
+        await sidecar.stop()
+
+
 async def test_sidecar_reports_parse_error_for_invalid_json(tmp_path) -> None:
     sidecar, written = await make_sidecar(tmp_path)
     try:
@@ -142,5 +186,22 @@ async def test_sidecar_preserves_request_id_for_method_error(tmp_path) -> None:
 
         assert written[-1]["id"] == 7
         assert written[-1]["error"]["code"] == -32601
+    finally:
+        await sidecar.stop()
+
+
+async def test_sidecar_rejects_out_of_range_knowledge_top_k(tmp_path) -> None:
+    sidecar, written = await make_sidecar(tmp_path)
+    try:
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":8,"method":"query_project_knowledge",'
+            '"params":{"project_path":"unused","question":"test","top_k":21}}'
+        )
+
+        assert written[-1]["id"] == 8
+        assert written[-1]["error"] == {
+            "code": -32602,
+            "message": "top_k must be between 1 and 20",
+        }
     finally:
         await sidecar.stop()
