@@ -1,7 +1,10 @@
 # V4 Windows 证据
 
-- 状态：`PENDING`
-- commit / workflow run / NSIS 与 sidecar SHA-256：`PENDING`
+- 状态：`CANDIDATE_BUILD_READY_PENDING_CLEAN_VM`
+- commit：`0aa78ecbc81b0e45e18830b9771ea31e6788c4b2`
+- workflow run：`27896180266`，Windows job 成功并通过 packaged-sidecar health check
+- artifact：`godot-bridle-windows-0aa78ecbc81b0e45e18830b9771ea31e6788c4b2`
+- NSIS / sidecar SHA-256：见 artifact 内 `SHA256SUMS-windows.txt`，VM 下载后复核
 - Windows 11 版本、架构、WebView2、Godot 版本：`PENDING`
 - 安装、覆盖升级、卸载：`PENDING`
 - 盘符 / 反斜杠 / 空格 / 中文 / 长路径：`PENDING`

@@ -44,7 +44,7 @@
 本地代码验证（2026-06-21）：
 - ✅ Python 3.11 下 100 tests passed，ruff 零错误
 - ✅ TypeScript build + Vitest 7 tests passed
-- ⏳ Rust `cargo check` 未在 Windows 本地执行（CI ubuntu-latest 覆盖）
+- ✅ Rust `cargo check --locked` 已在 Windows 本地与 CI 执行
 
 GitHub 状态（2026-06-21）：
 - ✅ 已创建需要 `Aknirex` 人工批准的 `external-api-smoke` environment
@@ -52,7 +52,7 @@ GitHub 状态（2026-06-21）：
 - ✅ 管理员也受必需检查约束，且禁止删除和强推 `main`
 - ⏳ 待配置 `DEEPSEEK_API_KEY`、`MESHY_API_KEY`、`EMBEDDING_API_KEY` Secrets
 - ⏳ 待配置 `EMBEDDING_API_BASE`、`EMBEDDING_MODEL` environment Variables
-- ⏳ 待本次变更合并后确认默认分支全绿
+- ✅ `main@0aa78ec` 的 CI run `27896141128` 四项检查全绿
 
 完成证据：默认分支上的全绿 workflow，且分支保护要求该 workflow 通过。
 
