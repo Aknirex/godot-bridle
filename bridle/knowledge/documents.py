@@ -50,6 +50,14 @@ class KnowledgeIndexSummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class KnowledgeIndexStatus(BaseModel):
+    project_root: Path
+    indexed: bool = False
+    documents_indexed: int = 0
+    chunks_indexed: int = 0
+    last_indexed_at: str | None = None
+
+
 class RetrievalHit(BaseModel):
     chunk_id: str
     source_id: str

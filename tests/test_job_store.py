@@ -164,6 +164,7 @@ def test_job_store_persists_project_provider_and_benchmark(tmp_path) -> None:
         ).fetchone()
         assert project_row["godot_version"] == "4.3"
         assert provider_row["api_key_env"] == "DEEPSEEK_API_KEY"
+        assert store.list_provider_configs()[0].provider_id == "deepseek"
         assert sample_row["duration_ms"] == 12
     finally:
         store.close()

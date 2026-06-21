@@ -23,6 +23,13 @@ fn sidecar_request(
 }
 
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
+    let state_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate application data directory: {error}"))?;
+    std::fs::create_dir_all(&state_dir)
+        .map_err(|error| format!("Cannot create application data directory: {error}"))?;
+    let database = state_dir.join("sidecar.sqlite3");
     let mut command = if cfg!(debug_assertions) {
         let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -42,6 +49,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .join("bridle-sidecar");
         Command::new(sidecar)
     };
+    command.arg("--db").arg(database);
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from bridle.domain.capabilities import ProviderCapability
 from bridle.domain.events import JsonValue
@@ -18,6 +18,8 @@ class ProviderKind(StrEnum):
 
 
 class ProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider_id: NonEmptyStr
     kind: ProviderKind
     backend: str | None = None

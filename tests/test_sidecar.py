@@ -107,6 +107,27 @@ async def test_sidecar_lists_and_tests_providers(tmp_path) -> None:
         await sidecar.stop()
 
 
+async def test_sidecar_saves_provider_metadata_without_plaintext_key(tmp_path) -> None:
+    sidecar, written = await make_sidecar(tmp_path)
+    try:
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":4,"method":"save_provider_config",'
+            '"params":{"provider_id":"openai_custom","kind":"llm",'
+            '"backend":"litellm","model":"openai/user-selected-model",'
+            '"api_key_env":"OPENAI_API_KEY","capabilities":["llm.chat"]}}'
+        )
+        await sidecar.handle_line(
+            '{"jsonrpc":"2.0","id":5,"method":"save_provider_config",'
+            '"params":{"provider_id":"unsafe","kind":"llm","api_key":"secret"}}'
+        )
+
+        assert written[-2]["result"]["provider_id"] == "openai_custom"
+        assert written[-1]["error"]["code"] == -32602
+        assert "plaintext secrets" in written[-1]["error"]["message"]
+    finally:
+        await sidecar.stop()
+
+
 async def test_sidecar_submit_workflow_and_stream_events(tmp_path) -> None:
     sidecar, written = await make_sidecar(tmp_path)
     try:

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from bridle import __version__
 from bridle.config.key_resolver import KeyResolver
+from bridle.config.secrets import contains_forbidden_secret_field
 from bridle.domain.assets import GodotImportResult
 from bridle.domain.capabilities import ProviderCapability
 from bridle.domain.errors import ConfigError, ProviderCapabilityError
@@ -29,7 +30,7 @@ from bridle.harness.job_store import SQLiteJobStore
 from bridle.harness.task_orchestrator import AsyncTaskOrchestrator, JobContext
 from bridle.knowledge.catalog import SQLiteKnowledgeCatalog
 from bridle.knowledge.chroma_store import ChromaVectorStore
-from bridle.knowledge.documents import KnowledgeAnswer, RetrievalHit
+from bridle.knowledge.documents import KnowledgeAnswer, KnowledgeIndexStatus, RetrievalHit
 from bridle.knowledge.service import ProjectKnowledgeService
 from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
 from bridle.providers.embedding_litellm import LiteLlmEmbeddingProvider
@@ -48,7 +49,14 @@ class BridleAppService:
         self.store = store
         self.events = events
         self.orchestrator = orchestrator
-        self.providers = providers if providers is not None else default_provider_configs()
+        self.providers = (
+            providers
+            if providers is not None
+            else _merge_provider_configs(
+                default_provider_configs(),
+                store.list_provider_configs(),
+            )
+        )
         self.key_resolver = key_resolver or KeyResolver()
         self._knowledge_services: dict[Path, ProjectKnowledgeService] = {}
         self._knowledge_lock = asyncio.Lock()
@@ -85,6 +93,22 @@ class BridleAppService:
 
     async def list_providers(self) -> list[dict]:
         return [provider.model_dump(mode="json") for provider in self.providers]
+
+    async def save_provider_config(self, params: dict) -> ProviderConfig:
+        if contains_forbidden_secret_field(params):
+            raise ConfigError(
+                "Provider config must not contain plaintext secrets. Use api_key_env instead."
+            )
+        try:
+            config = ProviderConfig.model_validate(params)
+        except ValidationError as error:
+            raise ConfigError("Invalid provider configuration.") from error
+        self.store.save_provider_config(config)
+        self.providers = _merge_provider_configs(self.providers, [config])
+        for knowledge in self._knowledge_services.values():
+            knowledge.catalog.close()
+        self._knowledge_services.clear()
+        return config
 
     async def test_provider(self, provider_id: str) -> ProviderHealth:
         provider = self._provider_by_id(provider_id)
@@ -191,6 +215,18 @@ class BridleAppService:
             )
         except ValueError as error:
             raise ConfigError(str(error)) from error
+
+    async def get_project_knowledge_status(
+        self,
+        project_path: str,
+    ) -> KnowledgeIndexStatus:
+        root = Path(project_path).resolve()
+        detect_project(root)
+        catalog = SQLiteKnowledgeCatalog(
+            self.store.db_path,
+            connection=self.store.connection,
+        )
+        return catalog.status(root)
 
     async def ask_project_knowledge(
         self,
@@ -325,3 +361,12 @@ def _import_log_excerpt(import_result: GodotImportResult, limit: int = 4_000) ->
         if text:
             excerpts.append(text)
     return "\n".join(excerpts)[:limit]
+
+
+def _merge_provider_configs(
+    defaults: list[ProviderConfig],
+    overrides: list[ProviderConfig],
+) -> list[ProviderConfig]:
+    merged = {provider.provider_id: provider for provider in defaults}
+    merged.update({provider.provider_id: provider for provider in overrides})
+    return list(merged.values())

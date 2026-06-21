@@ -104,6 +104,26 @@ class SQLiteJobStore:
         )
         self._conn.commit()
 
+    def list_provider_configs(self) -> list[ProviderConfig]:
+        rows = self._conn.execute(
+            "SELECT * FROM provider_configs ORDER BY created_at, provider_id"
+        ).fetchall()
+        return [
+            ProviderConfig.model_validate(
+                {
+                    "provider_id": row["provider_id"],
+                    "kind": row["kind"],
+                    "backend": row["backend"],
+                    "model": row["model"],
+                    "base_url": row["base_url"],
+                    "api_key_env": row["api_key_env"],
+                    "capabilities": json.loads(row["capabilities_json"]),
+                    "default_for": json.loads(row["default_for_json"]),
+                }
+            )
+            for row in rows
+        ]
+
     def record_benchmark(
         self,
         metric_name: str,

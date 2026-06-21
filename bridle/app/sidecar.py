@@ -94,6 +94,8 @@ class JsonRpcSidecar:
                 return _to_jsonable(await self.service.open_project(path))
             if method == "list_providers":
                 return await self.service.list_providers()
+            if method == "save_provider_config":
+                return _to_jsonable(await self.service.save_provider_config(params))
             if method == "test_provider":
                 provider_id = _required_str(params, "provider_id")
                 return _to_jsonable(await self.service.test_provider(provider_id))
@@ -108,6 +110,9 @@ class JsonRpcSidecar:
             if method == "index_project_knowledge":
                 path = _required_str(params, "project_path")
                 return _to_jsonable(await self.service.index_project_knowledge(path))
+            if method == "get_project_knowledge_status":
+                path = _required_str(params, "project_path")
+                return _to_jsonable(await self.service.get_project_knowledge_status(path))
             if method == "query_project_knowledge":
                 path = _required_str(params, "project_path")
                 question = _required_str(params, "question")

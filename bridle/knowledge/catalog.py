@@ -5,7 +5,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bridle.knowledge.documents import KnowledgeChunk, KnowledgeDocument
+from bridle.knowledge.documents import KnowledgeChunk, KnowledgeDocument, KnowledgeIndexStatus
 from bridle.storage.database import migrate_database
 
 
@@ -98,6 +98,22 @@ class SQLiteKnowledgeCatalog:
             (str(project_root.resolve()),),
         ).fetchone()
         return int(row[0])
+
+    def status(self, project_root: Path) -> KnowledgeIndexStatus:
+        root = project_root.resolve()
+        row = self._conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(chunk_count), 0), MAX(indexed_at)
+            FROM knowledge_sources WHERE project_root = ?""",
+            (str(root),),
+        ).fetchone()
+        documents = int(row[0])
+        return KnowledgeIndexStatus(
+            project_root=root,
+            indexed=documents > 0,
+            documents_indexed=documents,
+            chunks_indexed=int(row[1]),
+            last_indexed_at=str(row[2]) if row[2] is not None else None,
+        )
 
 
 def _indexed_content_hash(content_hash: str, index_identity: str | None) -> str:
