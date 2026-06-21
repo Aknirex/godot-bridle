@@ -3,11 +3,11 @@
   "productName": "Godot Bridle",
   "version": "0.1.0-alpha.0",
   "identifier": "dev.bridle.godot",
-  "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build && ../scripts/build-linux-sidecar.sh", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
+  "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build && uv run --project .. --frozen --extra packaging python ../scripts/build-sidecar.py", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
   "app": { "windows": [{ "title": "Godot Bridle", "width": 1120, "height": 760, "minWidth": 860, "minHeight": 620 }], "security": { "csp": null } },
   "bundle": {
     "active": true,
-    "targets": ["appimage", "deb"],
+    "targets": "all",
     "icon": ["icons/icon.png"],
     "externalBin": ["binaries/bridle-sidecar"]
   }

@@ -34,7 +34,7 @@
 ## 4. 真实 Provider 验收
 
 - [ ] DeepSeek 最小 chat smoke test 通过；
-- [ ] OpenAI embedding smoke test 通过；
+- [ ] 自定义 OpenAI-compatible embedding smoke test 通过；
 - [ ] Meshy 最小真实生成工作流通过；
 - [ ] 认证失败、限流、超时和 Provider 错误均显示脱敏详情；
 - [ ] 导入失败诊断能返回真实引用，诊断失败不改变原 job 错误；
@@ -66,7 +66,7 @@ API key 只通过 `api_key_env` 指向的环境变量读取，不写入 TOML、S
 
 ## 7. 已知限制
 
-- Windows 尚未经过 VM/实机验证，不发布正式 Windows 构建；
+- Windows 仅发布经过干净 Sandbox/VM 验收的 x64 NSIS 候选包；
 - macOS 尚无签名、公证和实机验收；
 - Alpha 只承诺 Linux AppImage/deb 候选包；
 - 知识回答依赖已配置的生产 embedding 与 LLM Provider；
@@ -94,6 +94,6 @@ API key 只通过 `api_key_env` 指向的环境变量读取，不写入 TOML、S
 
 ## 9. 发布决定
 
-- [ ] V1、V2、V3 和 V5 的证据完整；
+- [ ] V1、V2、V3、V4 和 V5 的证据完整；
 - [ ] 所有阻塞问题已关闭或明确从 Alpha 范围移除；
 - [ ] 发布负责人批准创建 `v0.1-alpha` tag 和 GitHub Release。
