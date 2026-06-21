@@ -1,12 +1,21 @@
 use command_group::{CommandGroup, GroupChild};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct SidecarState {
     child: Mutex<GroupChild>,
     stdin: Mutex<ChildStdin>,
+    ready: Arc<AtomicBool>,
+}
+
+#[tauri::command]
+fn sidecar_status(state: State<'_, SidecarState>) -> bool {
+    state.ready.load(Ordering::Acquire)
 }
 
 #[tauri::command]
@@ -42,20 +51,28 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .current_dir(project_root);
         command
     } else {
-        let executable = std::env::current_exe()
-            .map_err(|error| format!("Cannot locate desktop executable: {error}"))?;
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|error| format!("Cannot locate application resources: {error}"))?;
         let sidecar_name = if cfg!(windows) {
             "bridle-sidecar.exe"
         } else {
             "bridle-sidecar"
         };
-        let sidecar = executable
-            .parent()
-            .ok_or("Cannot locate desktop executable directory")?
+        let sidecar = resource_dir
+            .join("bridle-sidecar-runtime")
             .join(sidecar_name);
         Command::new(sidecar)
     };
     command.arg("--db").arg(database);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let ready = Arc::new(AtomicBool::new(false));
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -73,9 +90,13 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         .take()
         .ok_or("Sidecar stdout is unavailable")?;
     let handle = app.clone();
+    let reader_ready = ready.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) {
+                if message.get("method").and_then(|value| value.as_str()) == Some("sidecar.ready") {
+                    reader_ready.store(true, Ordering::Release);
+                }
                 let _ = handle.emit("sidecar-message", message);
             }
         }
@@ -83,6 +104,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     Ok(SidecarState {
         child: Mutex::new(child),
         stdin: Mutex::new(stdin),
+        ready,
     })
 }
 
@@ -95,7 +117,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sidecar_request])
+        .invoke_handler(tauri::generate_handler![sidecar_request, sidecar_status])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.try_state::<SidecarState>() {

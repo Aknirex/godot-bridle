@@ -7,8 +7,23 @@ export type RpcMessage = {
   params?: Json;
 };
 
-type Invoke = (command: string, args: Json) => Promise<unknown>;
+export type Invoke = (command: string, args: Json) => Promise<unknown>;
 type EventHandler = (event: Json) => void;
+
+export async function waitForSidecar(
+  invoke: Invoke,
+  timeoutMs = 30_000,
+  intervalMs = 250,
+  onProgress: (elapsedMs: number) => void = () => undefined,
+): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await invoke("sidecar_status", {}) === true) return;
+    onProgress(Date.now() - started);
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Sidecar did not become ready within ${Math.ceil(timeoutMs / 1_000)} seconds.`);
+}
 
 export class RpcClient {
   private requestId = 0;

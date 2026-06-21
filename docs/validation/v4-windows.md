@@ -16,5 +16,10 @@
 
 - 2026-06-21：`cargo check --locked` 与本地 NSIS 构建成功。
 - PyInstaller sidecar 修复 tiktoken plugin 收集后通过 JSON-RPC health check。
-- 观察到 packaged sidecar ready/health 用时约 93–116 秒；V4 验收必须复测并将该启动时延作为
-  发布风险处理，未确认可接受前本记录保持 `PENDING`。
+- 旧 onefile 候选包人工测试出现 sidecar 控制台窗口、约 93–116 秒启动延迟和 GUI 假死，判定为
+  V4 阻塞缺陷。
+- 修复后 sidecar 改为 onedir Tauri resource，Windows 使用 `CREATE_NO_WINDOW`，前端等待并限制
+  `sidecar.ready` 启动时间；本地主机复测无 sidecar 窗口、5 秒内完成 health、GUI 正常显示，
+  正常关闭后无残留 sidecar。
+- Windows 对 Tauri/WebView 主进程的 `Responding` 属性可能误报；人工验收应以实际交互、RPC
+  状态和窗口关闭行为为准。以上结果仍需在新候选包和干净 VM 复测。
