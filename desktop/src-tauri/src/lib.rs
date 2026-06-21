@@ -1,10 +1,11 @@
+use command_group::{CommandGroup, GroupChild};
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct SidecarState {
-    child: Mutex<Child>,
+    child: Mutex<GroupChild>,
     stdin: Mutex<ChildStdin>,
 }
 
@@ -43,10 +44,15 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     } else {
         let executable = std::env::current_exe()
             .map_err(|error| format!("Cannot locate desktop executable: {error}"))?;
+        let sidecar_name = if cfg!(windows) {
+            "bridle-sidecar.exe"
+        } else {
+            "bridle-sidecar"
+        };
         let sidecar = executable
             .parent()
             .ok_or("Cannot locate desktop executable directory")?
-            .join("bridle-sidecar");
+            .join(sidecar_name);
         Command::new(sidecar)
     };
     command.arg("--db").arg(database);
@@ -54,10 +60,18 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
-        .spawn()
+        .group_spawn()
         .map_err(|error| format!("Failed to start Bridle sidecar: {error}"))?;
-    let stdin = child.stdin.take().ok_or("Sidecar stdin is unavailable")?;
-    let stdout = child.stdout.take().ok_or("Sidecar stdout is unavailable")?;
+    let stdin = child
+        .inner()
+        .stdin
+        .take()
+        .ok_or("Sidecar stdin is unavailable")?;
+    let stdout = child
+        .inner()
+        .stdout
+        .take()
+        .ok_or("Sidecar stdout is unavailable")?;
     let handle = app.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {

@@ -14,7 +14,8 @@ uv run bridle health
 ```
 
 Default CI and local tests exclude real provider calls. Opt-in smoke tests require protected
-`DEEPSEEK_API_KEY`, `MESHY_API_KEY`, and `OPENAI_API_KEY` values; see
+`DEEPSEEK_API_KEY`, `MESHY_API_KEY`, and `EMBEDDING_API_KEY` values plus the
+`EMBEDDING_API_BASE` and `EMBEDDING_MODEL` environment variables; see
 [`docs/10-validation-debt-and-next-development-plan.md`](docs/10-validation-debt-and-next-development-plan.md).
 
 The desktop shell will talk to the Python core through the stdio JSON-RPC sidecar:

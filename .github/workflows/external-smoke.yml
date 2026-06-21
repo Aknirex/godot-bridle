@@ -15,7 +15,9 @@ jobs:
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       MESHY_API_KEY: ${{ secrets.MESHY_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_BASE: ${{ vars.EMBEDDING_API_BASE }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -26,7 +28,9 @@ jobs:
         run: |
           test -n "$DEEPSEEK_API_KEY"
           test -n "$MESHY_API_KEY"
-          test -n "$OPENAI_API_KEY"
+          test -n "$EMBEDDING_API_KEY"
+          test -n "$EMBEDDING_API_BASE"
+          test -n "$EMBEDDING_MODEL"
       - name: Install Python dependencies
         run: uv sync --frozen --extra dev --extra knowledge
       - name: Run opt-in provider smoke tests

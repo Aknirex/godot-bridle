@@ -68,7 +68,7 @@ async def test_run_godot_import_check_kills_timed_out_process(tmp_path) -> None:
         project_root=tmp_path,
         logs_dir=tmp_path / "logs",
         extra_args=[str(mock_godot)],
-        timeout_seconds=0.05,
+        timeout_seconds=0.5,
     )
 
     assert not result.success
