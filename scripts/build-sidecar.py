@@ -23,21 +23,26 @@ def rust_host_triple() -> str:
     raise RuntimeError("rustc did not report a host target triple")
 
 
-def sidecar_target_path(root: Path, target_triple: str) -> Path:
+def sidecar_runtime_path(root: Path, target_triple: str) -> Path:
     if "-linux-gnu" in target_triple:
         suffix = ""
     elif "-windows-" in target_triple:
         suffix = ".exe"
     else:
         raise ValueError(f"Unsupported sidecar target triple: {target_triple}")
-    return root / "desktop" / "src-tauri" / "binaries" / (
-        f"bridle-sidecar-{target_triple}{suffix}"
+    return (
+        root
+        / "desktop"
+        / "src-tauri"
+        / "binaries"
+        / "bridle-sidecar-runtime"
+        / f"bridle-sidecar{suffix}"
     )
 
 
 def main() -> int:
     target_triple = os.environ.get("TAURI_ENV_TARGET_TRIPLE") or rust_host_triple()
-    target_path = sidecar_target_path(ROOT, target_triple)
+    target_path = sidecar_runtime_path(ROOT, target_triple)
     if os.environ.get("BRIDLE_REUSE_SIDECAR") == "1" and target_path.is_file():
         print(f"Reusing existing sidecar: {target_path}")
         return 0
@@ -60,11 +65,12 @@ def main() -> int:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onefile",
         "--collect-data",
         "litellm",
         "--collect-all",
         "tiktoken",
+        "--hidden-import",
+        "litellm",
         "--hidden-import",
         "tiktoken_ext.openai_public",
         "--name",
@@ -79,12 +85,11 @@ def main() -> int:
     ]
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 
-    built_name = "bridle-sidecar.exe" if target_path.suffix == ".exe" else "bridle-sidecar"
-    built_path = dist_path / built_name
+    built_path = dist_path / "bridle-sidecar" / target_path.name
     if not built_path.is_file():
         raise FileNotFoundError(f"PyInstaller did not create {built_path}")
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(built_path, target_path)
+    shutil.rmtree(target_path.parent, ignore_errors=True)
+    shutil.copytree(built_path.parent, target_path.parent)
     print(f"Built sidecar: {target_path}")
     return 0
 

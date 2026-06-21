@@ -50,11 +50,12 @@ npm ci
 npm run tauri -- build --bundles appimage,deb
 ```
 
-Linux 发布包使用 PyInstaller 构建 Python sidecar，并生成 AppImage 和 deb。发布前应在不含
+Linux 发布包使用 PyInstaller onedir 构建 Python sidecar runtime，并生成 AppImage 和 deb。发布前应在不含
 Python/uv 的干净 Linux 环境验证启动、Unicode 项目路径、Godot executable 查找和 sidecar
 终止行为。
 
-Windows x64 使用相同的跨平台 sidecar 构建脚本，并生成 NSIS 安装器：
+Windows x64 使用相同的跨平台 onedir sidecar 构建脚本，并生成 NSIS 安装器。Tauri 从 resource
+目录启动 sidecar，并以无控制台窗口模式保留 stdin/stdout JSON-RPC 管道：
 
 ```powershell
 uv sync --extra dev --extra packaging

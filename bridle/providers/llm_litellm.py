@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import time
+from importlib import import_module
 from typing import Any
-
-import litellm
 
 from bridle.config.key_resolver import KeyResolver
 from bridle.domain.errors import AuthError, ProviderError
@@ -14,6 +13,14 @@ from bridle.domain.providers import (
     ProviderHealth,
     ProviderHealthStatus,
 )
+
+
+class _LazyLiteLlm:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(import_module("litellm"), name)
+
+
+litellm = _LazyLiteLlm()
 
 
 class LiteLlmProvider:

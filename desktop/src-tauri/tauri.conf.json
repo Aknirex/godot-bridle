@@ -8,7 +8,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"],
-    "externalBin": ["binaries/bridle-sidecar"]
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": {
+      "binaries/bridle-sidecar-runtime": "bridle-sidecar-runtime"
+    }
   }
 }

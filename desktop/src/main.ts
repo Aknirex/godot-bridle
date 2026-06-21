@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { RpcClient, type Json, type RpcMessage } from "./rpc";
+import { RpcClient, type Json, type RpcMessage, waitForSidecar } from "./rpc";
 import { activateJob, appState, selectProject } from "./state";
 import { appendJobEvent, renderKnowledgeAnswer, showError } from "./views";
 import "./style.css";
@@ -195,10 +195,15 @@ $("#save-provider").onclick = async () => {
 
 async function initialize() {
   try {
+    await waitForSidecar(invoke, 30_000, 250, (elapsedMs) => {
+      $("#connection").textContent = `Starting sidecar… ${Math.floor(elapsedMs / 1_000)}s`;
+    });
     const health = await rpc("health") as Json;
     $("#connection").textContent = `${health.name} ${health.version}`;
     await refreshProviders();
-  } catch (error) { $("#connection").textContent = `Offline: ${error}`; }
+  } catch (error) {
+    $("#connection").textContent = `Offline: ${error}`;
+  }
 }
 
 async function monitorJob(jobId: string): Promise<void> {

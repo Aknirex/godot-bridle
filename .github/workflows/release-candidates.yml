@@ -46,11 +46,15 @@ jobs:
         working-directory: desktop
         run: npm run tauri -- build --bundles appimage,deb
       - name: Check packaged Linux sidecar
-        run: uv run --frozen python scripts/check-packaged-sidecar.py desktop/src-tauri/binaries/bridle-sidecar-x86_64-unknown-linux-gnu
+        run: uv run --frozen python scripts/check-packaged-sidecar.py desktop/src-tauri/binaries/bridle-sidecar-runtime/bridle-sidecar
       - name: Create checksums
         run: |
+          runtime_archive="$PWD/desktop/src-tauri/target/release/bundle/bridle-sidecar-runtime-linux.tar.gz"
+          tar -C desktop/src-tauri/binaries -czf \
+            "$runtime_archive" \
+            bridle-sidecar-runtime
           find desktop/src-tauri/target/release/bundle -type f \
-            \( -name '*.AppImage' -o -name '*.deb' \) -print0 \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name 'bridle-sidecar-runtime-linux.tar.gz' \) -print0 \
             | sort -z \
             | xargs -0 sha256sum > desktop/src-tauri/target/release/bundle/SHA256SUMS-linux.txt
       - uses: actions/upload-artifact@v4
@@ -61,6 +65,7 @@ jobs:
           path: |
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
             desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/bridle-sidecar-runtime-linux.tar.gz
             desktop/src-tauri/target/release/bundle/SHA256SUMS-linux.txt
 
   windows:
@@ -92,14 +97,16 @@ jobs:
         run: npm run tauri -- build --bundles nsis
       - name: Check packaged Windows sidecar
         shell: pwsh
-        run: uv run --frozen python scripts/check-packaged-sidecar.py desktop/src-tauri/binaries/bridle-sidecar-x86_64-pc-windows-msvc.exe
+        run: uv run --frozen python scripts/check-packaged-sidecar.py desktop/src-tauri/binaries/bridle-sidecar-runtime/bridle-sidecar.exe
       - name: Create checksums
         shell: pwsh
         run: |
           $bundle = "desktop/src-tauri/target/release/bundle"
+          $runtimeArchive = "$bundle/bridle-sidecar-runtime-windows.zip"
+          Compress-Archive -Path "desktop/src-tauri/binaries/bridle-sidecar-runtime/*" -DestinationPath $runtimeArchive
           $files = @(
             Get-ChildItem "$bundle/nsis/*.exe"
-            Get-ChildItem "desktop/src-tauri/binaries/bridle-sidecar-*.exe"
+            Get-Item $runtimeArchive
           ) | Sort-Object FullName
           $lines = foreach ($file in $files) {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
@@ -113,5 +120,5 @@ jobs:
           if-no-files-found: error
           path: |
             desktop/src-tauri/target/release/bundle/nsis/*.exe
-            desktop/src-tauri/binaries/bridle-sidecar-*.exe
+            desktop/src-tauri/target/release/bundle/bridle-sidecar-runtime-windows.zip
             desktop/src-tauri/target/release/bundle/SHA256SUMS-windows.txt
