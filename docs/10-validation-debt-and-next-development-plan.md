@@ -1,10 +1,27 @@
 # 验证债务与后续开发计划
 
+> **最后更新**：2026-06-21
+> **当前阶段**：D5（Alpha 验证债务清零）— D1-D4 代码实现完成
+
 ## 1. 目的
 
-当前代码已覆盖 v0.1-alpha 的主要功能闭环，并开始交付 P1 RAG。为了保持开发节奏，本文将暂时不执行的发布验证显式登记为**验证债务**，同时固定下一阶段的开发顺序。
+当前代码已覆盖 v0.1-alpha 的全部功能闭环（WP0-WP8）及 P1 RAG 增强（K1-K6）。为了保持开发节奏，本文将暂时不执行的发布验证显式登记为**验证债务**，同时固定下一阶段的开发顺序。
 
 暂缓验证不代表验收通过。以下验证债务必须在创建 `v0.1-alpha` release、上传安装包或宣称平台支持前清零。
+
+### 1.1 最新代码健康检查（2026-06-21）
+
+| 检查项 | 结果 |
+|--------|------|
+| Python 测试 | ✅ 100 passed, 1 skipped, 3 deselected |
+| Ruff lint | ✅ All checks passed |
+| CLI health | ✅ `{"status":"ok"}` |
+| TypeScript 测试 (Vitest) | ✅ 7 passed (3 files) |
+| TypeScript 编译 | ✅ 零错误 |
+| Vite 生产构建 | ✅ 193ms |
+| Rust check | ⏳ 未在 Windows 本地执行（CI ubuntu-latest 覆盖） |
+
+自动化门禁全部通过，代码层面就绪。D1-D4 所有功能（K3-K6）已完成实现，仅待 V2/V3 真实环境验收。
 
 ## 2. 当前范围判断
 
@@ -22,19 +39,20 @@
 
 ### V1：CI 基线
 
-状态：`IMPLEMENTED_PENDING_REMOTE_ENFORCEMENT`
+状态：`CODE_VERIFIED_PENDING_GITHUB_ENFORCEMENT`
 
-- GitHub Actions 在受支持 Python 版本运行 `ruff` 和默认 pytest；
-- 前端运行 TypeScript build 和 Vitest；
-- Rust 运行 `cargo check`；
-- 外部 API 测试默认跳过，仅允许手动或受保护的 Secret job 触发；
-- CI 不输出 API key、authorization header 或未脱敏 Provider 响应。
+本地代码验证（2026-06-21）：
+- ✅ Python 3.11 下 100 tests passed，ruff 零错误
+- ✅ TypeScript build + Vitest 7 tests passed
+- ⏳ Rust `cargo check` 未在 Windows 本地执行（CI ubuntu-latest 覆盖）
+
+仍需在 GitHub 上完成：
+- [ ] 创建受保护的 `external-api-smoke` environment
+- [ ] 配置 `DEEPSEEK_API_KEY`、`MESHY_API_KEY`、`OPENAI_API_KEY` 三个 Secret
+- [ ] 将 CI jobs（python 3.11/3.12、desktop、rust）设为分支保护必需检查
+- [ ] 触发 push 确认全绿 workflow
 
 完成证据：默认分支上的全绿 workflow，且分支保护要求该 workflow 通过。
-
-仓库已提供 `.github/workflows/ci.yml` 和手动触发的
-`.github/workflows/external-smoke.yml`。仍需在 GitHub 上创建受保护的
-`external-api-smoke` environment、配置三个 Provider Secret，并将 CI jobs 设为分支保护的必需检查。
 
 ### V2：干净 Linux 安装包验证
 

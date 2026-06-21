@@ -1,13 +1,27 @@
 # godot-bridle RAG 与向量知识库设计
 
-> **文档版本**：v0.1
+> **文档版本**：v0.2
 > **创建日期**：2026-06-19
-> **阶段**：P1 方案设计
+> **最后更新**：2026-06-21
+> **阶段**：P1 已实施（K1-K6 全部完成）
 > **依赖文档**：
 > - [03-provider-research-and-tech-stack.md](03-provider-research-and-tech-stack.md) v0.1
 > - [04-architecture-decisions.md](04-architecture-decisions.md) v0.1
 > - [05-system-design.md](05-system-design.md) v0.2
-> **状态**：建议采纳
+> **状态**：已实施 → 待 V3 真实服务验证
+
+### 实施完成确认（2026-06-21）
+
+| Slice | 设计模块 | 实施文件 | 状态 |
+|-------|---------|---------|------|
+| K1 | `documents.py`、`chunking.py`、`indexer.py`、`scanner.py` | `bridle/knowledge/` | ✅ |
+| K2 | `vector_store.py`、`chroma_store.py` | `bridle/knowledge/` | ✅ |
+| K3 | `embeddings.py` + embedding provider | `bridle/knowledge/embeddings.py` + `bridle/providers/embedding_litellm.py` | ✅ |
+| K4 | `rag.py` → `service.py` | `bridle/knowledge/service.py`（`ask_project` + 引用校验） | ✅ |
+| K5 | 导入诊断集成 | `bridle/harness/character_workflow.py` | ✅ |
+| K6 | 桌面可视化 | `desktop/src/views.ts`（Knowledge/Assistant/Jobs 诊断） | ✅ |
+
+注：实际实施中 `rag.py` + `retriever.py` 合并为 [`service.py`](bridle/knowledge/service.py)，`catalog.py` 为新增的 SQLite 知识目录。
 
 ---
 
