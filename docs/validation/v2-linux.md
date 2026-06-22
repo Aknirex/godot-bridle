@@ -1,9 +1,9 @@
 # V2 Linux 实机证据
 
 - 状态：`CANDIDATE_BUILD_READY_PENDING_REAL_MACHINE`
-- commit：`0aa78ecbc81b0e45e18830b9771ea31e6788c4b2`
-- workflow run：`27896180266`，Linux job 成功并通过 packaged-sidecar health check
-- artifact：`godot-bridle-linux-0aa78ecbc81b0e45e18830b9771ea31e6788c4b2`
+- commit：`0bfc1adc07d8b6b01adc5881bf04e31323510566`
+- workflow run：`27925270250`，Linux job 成功并通过 packaged-sidecar health check
+- artifact：`godot-bridle-linux-0bfc1adc07d8b6b01adc5881bf04e31323510566`
 - AppImage / deb SHA-256：见 artifact 内 `SHA256SUMS-linux.txt`，实机下载后复核
 - Linux 发行版、架构、桌面环境、Godot 版本：`PENDING`
 - AppImage 启动、deb 安装：`PENDING`
