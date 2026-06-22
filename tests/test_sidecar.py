@@ -54,7 +54,7 @@ async def test_sidecar_sends_ready_notification(tmp_path) -> None:
     sidecar, written = await make_sidecar(tmp_path)
     try:
         assert written[0]["method"] == "sidecar.ready"
-        assert written[0]["params"]["protocol_version"] == "2026-06-18"
+        assert written[0]["params"]["protocol_version"] == "2026-06-22"
     finally:
         await sidecar.stop()
 

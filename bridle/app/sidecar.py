@@ -14,8 +14,24 @@ from pydantic import BaseModel
 from bridle.app.services import BridleAppService
 from bridle.domain.errors import BridleError, BridleErrorCode
 
-PROTOCOL_VERSION = "2026-06-18"
+PROTOCOL_VERSION = "2026-06-22"
 JSONRPC_VERSION = "2.0"
+
+METHOD_ALIASES = {
+    "health": "system.health",
+    "open_project": "projects.open",
+    "list_providers": "providers.list",
+    "save_provider_config": "providers.save",
+    "test_provider": "providers.test",
+    "submit_workflow": "workflows.submit",
+    "get_job_status": "jobs.get",
+    "cancel_job": "jobs.cancel",
+    "stream_job_events": "jobs.subscribe",
+    "index_project_knowledge": "knowledge.index",
+    "get_project_knowledge_status": "knowledge.status",
+    "query_project_knowledge": "knowledge.query",
+    "ask_project_knowledge": "knowledge.ask",
+}
 
 JsonWriter = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -41,7 +57,12 @@ class JsonRpcSidecar:
                 "method": "sidecar.ready",
                 "params": {
                     "protocol_version": PROTOCOL_VERSION,
-                    "capabilities": ["request_response", "job.event"],
+                    "capabilities": [
+                        "request_response",
+                        "job.event",
+                        "llm.stream",
+                        "namespaced_methods",
+                    ],
                 },
             }
         )
@@ -84,36 +105,46 @@ class JsonRpcSidecar:
         return request
 
     async def _dispatch(self, request: dict[str, Any]) -> Any:
-        method = request["method"]
+        method = METHOD_ALIASES.get(request["method"], request["method"])
         params = request.get("params") or {}
         try:
-            if method == "health":
+            if method == "system.health":
                 return await self.service.health()
-            if method == "open_project":
+            if method == "system.capabilities":
+                return {
+                    "protocol_version": PROTOCOL_VERSION,
+                    "methods": sorted(
+                        set(METHOD_ALIASES.values())
+                        | {"system.capabilities", "providers.stream_chat"}
+                    ),
+                }
+            if method == "projects.open":
                 path = _required_str(params, "path")
                 return _to_jsonable(await self.service.open_project(path))
-            if method == "list_providers":
+            if method == "providers.list":
                 return await self.service.list_providers()
-            if method == "save_provider_config":
+            if method == "providers.save":
                 return _to_jsonable(await self.service.save_provider_config(params))
-            if method == "test_provider":
+            if method == "providers.test":
                 provider_id = _required_str(params, "provider_id")
                 return _to_jsonable(await self.service.test_provider(provider_id))
-            if method == "submit_workflow":
+            if method == "providers.stream_chat":
+                return await self._start_llm_stream(params)
+            if method == "workflows.submit":
                 return _to_jsonable(await self.service.submit_workflow(params))
-            if method == "get_job_status":
+            if method == "jobs.get":
                 job_id = _required_str(params, "job_id")
                 return _to_jsonable(await self.service.get_job_status(job_id))
-            if method == "cancel_job":
+            if method == "jobs.cancel":
                 job_id = _required_str(params, "job_id")
                 return _to_jsonable(await self.service.cancel_job(job_id))
-            if method == "index_project_knowledge":
+            if method == "knowledge.index":
                 path = _required_str(params, "project_path")
                 return _to_jsonable(await self.service.index_project_knowledge(path))
-            if method == "get_project_knowledge_status":
+            if method == "knowledge.status":
                 path = _required_str(params, "project_path")
                 return _to_jsonable(await self.service.get_project_knowledge_status(path))
-            if method == "query_project_knowledge":
+            if method == "knowledge.query":
                 path = _required_str(params, "project_path")
                 question = _required_str(params, "question")
                 top_k, filters = _knowledge_query_options(params)
@@ -124,7 +155,7 @@ class JsonRpcSidecar:
                     filters=filters,
                 )
                 return [_to_jsonable(hit) for hit in hits]
-            if method == "ask_project_knowledge":
+            if method == "knowledge.ask":
                 path = _required_str(params, "project_path")
                 question = _required_str(params, "question")
                 top_k, filters = _knowledge_query_options(params)
@@ -136,7 +167,7 @@ class JsonRpcSidecar:
                         filters=filters,
                     )
                 )
-            if method == "stream_job_events":
+            if method == "jobs.subscribe":
                 return await self._start_event_stream(params)
         except BridleError as error:
             code = _json_rpc_code_for(error.code)
@@ -155,6 +186,51 @@ class JsonRpcSidecar:
         self._stream_tasks[stream_id] = task
         task.add_done_callback(lambda _: self._stream_tasks.pop(stream_id, None))
         return {"stream_id": stream_id}
+
+    async def _start_llm_stream(self, params: dict[str, Any]) -> dict[str, str]:
+        provider_id = _required_str(params, "provider_id")
+        request = params.get("request")
+        if not isinstance(request, dict):
+            raise JsonRpcProtocolError(-32602, "request must be an object")
+        stream_id = f"stream_{uuid4().hex}"
+        task = asyncio.create_task(
+            self._pump_llm_stream(stream_id, provider_id, request),
+            name=f"bridle-llm-{stream_id}",
+        )
+        self._stream_tasks[stream_id] = task
+        task.add_done_callback(lambda _: self._stream_tasks.pop(stream_id, None))
+        return {"stream_id": stream_id}
+
+    async def _pump_llm_stream(
+        self,
+        stream_id: str,
+        provider_id: str,
+        request: dict[str, Any],
+    ) -> None:
+        try:
+            async for event in self.service.stream_llm_chat(provider_id, request):
+                await self.write(
+                    {
+                        "jsonrpc": JSONRPC_VERSION,
+                        "method": f"llm.{event.type.value}",
+                        "params": {
+                            "stream_id": stream_id,
+                            "event": _to_jsonable(event),
+                        },
+                    }
+                )
+        except BridleError as error:
+            await self.write(
+                {
+                    "jsonrpc": JSONRPC_VERSION,
+                    "method": "llm.failed",
+                    "params": {
+                        "stream_id": stream_id,
+                        "error_code": error.code.value,
+                        "safe_details": error.safe_details,
+                    },
+                }
+            )
 
     async def _pump_job_events(self, stream_id: str, job_id: str, after_sequence: int) -> None:
         async for event in self.service.events.stream_job_events(

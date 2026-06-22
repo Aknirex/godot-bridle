@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.27.0",
-  "litellm>=1.0.0",
   "pydantic>=2.7.0",
   "pydantic-settings>=2.3.0",
   "structlog>=24.1.0",
@@ -21,12 +20,18 @@ dev = [
 assets = [
   "pygltflib>=1.16.0",
   "trimesh>=4.4.0",
+  "xatlas>=0.0.11",
 ]
 packaging = [
-  "pyinstaller>=6.10.0",
+  "nuitka>=2.8.0",
+  "ordered-set>=4.1.0",
+  "zstandard>=0.23.0",
 ]
 knowledge = [
   "chromadb>=1.0.0",
+]
+litellm = [
+  "litellm>=1.0.0",
 ]
 
 [project.scripts]

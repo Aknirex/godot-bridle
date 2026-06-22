@@ -3,14 +3,15 @@
   "productName": "Godot Bridle",
   "version": "0.1.0-alpha.0",
   "identifier": "dev.bridle.godot",
-  "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build && uv run --project .. --frozen --extra packaging python ../scripts/build-sidecar.py", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
+  "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build && uv run --project .. --frozen --extra packaging --extra assets python ../scripts/build-sidecar.py", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
   "app": { "windows": [{ "title": "Godot Bridle", "width": 1120, "height": 760, "minWidth": 860, "minHeight": 620 }], "security": { "csp": null } },
   "bundle": {
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "resources": {
-      "binaries/bridle-sidecar-runtime": "bridle-sidecar-runtime"
+      "binaries/bridle-sidecar-runtime": "bridle-sidecar-runtime",
+      "binaries/bridle-daemon-runtime": "bridle-daemon-runtime"
     }
   }
 }

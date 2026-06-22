@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 
 import pytest
@@ -8,6 +9,11 @@ from bridle.config.key_resolver import KeyResolver
 from bridle.domain.errors import AuthError, ProviderError
 from bridle.domain.providers import ProviderConfig, ProviderKind
 from bridle.providers.embedding_litellm import LiteLlmEmbeddingProvider
+
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("litellm") is None,
+    reason="LiteLLM compatibility extra is not installed",
+)
 
 
 def embedding_config(

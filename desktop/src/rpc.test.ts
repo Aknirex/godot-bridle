@@ -7,12 +7,12 @@ describe("RpcClient", () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const client = new RpcClient(invoke, vi.fn());
 
-    const response = client.request("health");
+    const response = client.request("system.health");
     client.handle({ id: 1, result: { status: "ok" } });
 
     await expect(response).resolves.toEqual({ status: "ok" });
     expect(invoke).toHaveBeenCalledWith("sidecar_request", {
-      request: { jsonrpc: "2.0", id: 1, method: "health", params: {} },
+      request: { jsonrpc: "2.0", id: 1, method: "system.health", params: {} },
     });
   });
 
@@ -40,7 +40,7 @@ describe("waitForSidecar", () => {
     const invoke = vi.fn().mockResolvedValue(false);
 
     await expect(waitForSidecar(invoke, 5, 1)).rejects.toThrow(
-      "Sidecar did not become ready within 1 seconds.",
+      "Local service did not become ready within 1 seconds.",
     );
   });
 });

@@ -59,11 +59,88 @@ async def test_mock_character_workflow_runs_full_asset_pipeline(tmp_path) -> Non
         assert record.source_path.is_file()
         assert record.manifest_path.is_file()
         assert (record.manifest_path.parent / "godot" / "preview_scene.tscn").is_file()
+        assert (record.manifest_path.parent / "godot" / "validate_import.gd").is_file()
         assert [
             event.stage
             for event in store.replay_events(ref.job_id)
             if event.type == "stage.started"
         ] == list(CharacterGenerationWorkflow.stages)
+    finally:
+        await service.stop()
+
+
+async def test_mock_image_character_workflow_can_auto_rig(tmp_path) -> None:
+    project = tmp_path / "image-game"
+    project.mkdir()
+    (project / "project.godot").write_text('config/name="Image Demo"\n', encoding="utf-8")
+    store = SQLiteJobStore(tmp_path / "image-bridle.sqlite3")
+    events = JobEventBroker(store)
+    orchestrator = AsyncTaskOrchestrator(store, events)
+    service = BridleAppService(store, events, orchestrator)
+    await service.start()
+    try:
+        ref = await service.submit_workflow(
+            {
+                "workflow_id": "character_gen",
+                "project_path": str(project),
+                "prompt": "hero reference",
+                "input_type": "image",
+                "image_url": "https://assets.test/hero.png",
+                "provider_id": "meshy_mock",
+                "auto_rig": True,
+                "poll_interval_seconds": 0,
+            }
+        )
+        status = await wait_for_terminal_state(orchestrator, ref.job_id)
+        generated = next(
+            event
+            for event in store.replay_events(ref.job_id)
+            if event.type == "asset.generated"
+        )
+        record = store.get_generated_asset(str(generated.payload["asset_id"]))
+
+        assert status.state == JobState.SUCCEEDED
+        assert record is not None
+        assert record.rigging["requested"] is True
+        assert record.provenance["input_type"] == "image"
+    finally:
+        await service.stop()
+
+
+async def test_mock_retexture_and_standalone_auto_rig_workflows(tmp_path) -> None:
+    project = tmp_path / "asset-operations"
+    project.mkdir()
+    (project / "project.godot").write_text("[application]\n", encoding="utf-8")
+    store = SQLiteJobStore(tmp_path / "asset-operations.sqlite3")
+    events = JobEventBroker(store)
+    orchestrator = AsyncTaskOrchestrator(store, events)
+    service = BridleAppService(store, events, orchestrator)
+    await service.start()
+    try:
+        for input_type in ("retexture", "auto_rig"):
+            ref = await service.submit_workflow(
+                {
+                    "workflow_id": "character_gen",
+                    "project_path": str(project),
+                    "prompt": f"mock {input_type}",
+                    "input_type": input_type,
+                    "source_task_id": "existing_meshy_task",
+                    "provider_id": "meshy_mock",
+                    "poll_interval_seconds": 0,
+                }
+            )
+            status = await wait_for_terminal_state(orchestrator, ref.job_id)
+            generated = next(
+                event
+                for event in store.replay_events(ref.job_id)
+                if event.type == "asset.generated"
+            )
+            record = store.get_generated_asset(str(generated.payload["asset_id"]))
+
+            assert status.state == JobState.SUCCEEDED
+            assert record is not None
+            assert record.provenance["input_type"] == input_type
+            assert record.rigging["requested"] is (input_type == "auto_rig")
     finally:
         await service.stop()
 

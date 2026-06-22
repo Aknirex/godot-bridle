@@ -24,6 +24,20 @@ class GlbInspectionReport(BaseModel):
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class AssetRepairAction(BaseModel):
+    action: str
+    applied: bool
+    safe_details: str
+    output_path: Path | None = None
+
+
+class MaterialArtifact(BaseModel):
+    material_index: int
+    name: str
+    tres_path: Path | None = None
+    texture_paths: dict[str, Path] = Field(default_factory=dict)
+
+
 class GodotImportResult(BaseModel):
     success: bool
     exit_code: int
@@ -41,3 +55,9 @@ class GeneratedAssetRecord(BaseModel):
     manifest_path: Path
     sha256: str
     inspection: GlbInspectionReport
+    normalized_path: Path | None = None
+    repairs: list[AssetRepairAction] = Field(default_factory=list)
+    materials: list[MaterialArtifact] = Field(default_factory=list)
+    rigging: dict[str, JsonValue] = Field(default_factory=dict)
+    provenance: dict[str, JsonValue] = Field(default_factory=dict)
+    godot_validation: GodotImportResult | None = None

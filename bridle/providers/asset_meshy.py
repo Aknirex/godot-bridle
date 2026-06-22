@@ -32,6 +32,7 @@ class MeshyProvider:
         self.key_resolver = key_resolver or KeyResolver()
         self._client = client
         self._owned_client: httpx.AsyncClient | None = None
+        self._task_paths: dict[str, tuple[str, str]] = {}
 
     async def __aenter__(self) -> MeshyProvider:
         return self
@@ -77,18 +78,72 @@ class MeshyProvider:
         task_id = str(response.get("result") or response.get("id") or response.get("task_id") or "")
         if not task_id:
             raise ProviderError("Meshy response did not include a task id.")
+        poll_path = f"/openapi/v2/text-to-3d/{task_id}"
+        self._task_paths[task_id] = ("text_to_3d", poll_path)
         return AssetTaskRef(
             provider_id=self.config.provider_id,
             task_id=task_id,
             status=AssetTaskStatus.SUBMITTED,
+            task_type="text_to_3d",
+            poll_path=poll_path,
             raw=_json_object(response),
         )
 
-    async def poll_task(self, task_id: str) -> AssetTaskResult:
+    async def submit_image_to_3d(self, request: AssetGenerationRequest) -> AssetTaskRef:
+        if not request.image_url:
+            raise ProviderError("Meshy Image-to-3D requires image_url.")
+        payload: dict[str, Any] = {"image_url": request.image_url}
+        payload.update(_allowed_options(request.provider_options))
+        return await self._submit_task(
+            "/openapi/v1/image-to-3d",
+            payload,
+            task_type="image_to_3d",
+        )
+
+    async def submit_retexture(self, request: AssetGenerationRequest) -> AssetTaskRef:
+        if not request.source_task_id and not request.model_url:
+            raise ProviderError("Meshy Retexture requires source_task_id or model_url.")
+        payload: dict[str, Any] = {}
+        if request.source_task_id:
+            payload["input_task_id"] = request.source_task_id
+        if request.model_url:
+            payload["model_url"] = request.model_url
+        payload.update(_allowed_options(request.provider_options))
+        return await self._submit_task(
+            "/openapi/v1/retexture",
+            payload,
+            task_type="retexture",
+        )
+
+    async def submit_auto_rig(self, request: AssetGenerationRequest) -> AssetTaskRef:
+        if not request.source_task_id and not request.model_url:
+            raise ProviderError("Meshy Auto-Rig requires source_task_id or model_url.")
+        payload: dict[str, Any] = {}
+        if request.source_task_id:
+            payload["input_task_id"] = request.source_task_id
+        if request.model_url:
+            payload["model_url"] = request.model_url
+        payload.update(_allowed_options(request.provider_options))
+        return await self._submit_task(
+            "/openapi/v1/rigging",
+            payload,
+            task_type="auto_rig",
+        )
+
+    async def poll_task(self, task: AssetTaskRef | str) -> AssetTaskResult:
+        task_id = task.task_id if isinstance(task, AssetTaskRef) else task
+        if isinstance(task, AssetTaskRef) and task.poll_path:
+            task_type = task.task_type
+            poll_path = task.poll_path
+        else:
+            task_type, poll_path = self._task_paths.get(
+                task_id,
+                ("text_to_3d", f"/openapi/v2/text-to-3d/{task_id}"),
+            )
         api_key = self.key_resolver.resolve_required(self.config)
         response = await self._request(
             "GET",
-            f"/openapi/v2/text-to-3d/{task_id}",
+            poll_path,
             api_key=api_key,
         )
         status = _map_meshy_status(str(response.get("status", "unknown")))
@@ -97,22 +152,73 @@ class MeshyProvider:
             provider_id=self.config.provider_id,
             task_id=task_id,
             status=status,
+            task_type=task_type,
+            progress=_progress(response),
             asset_urls=asset_urls,
+            texture_urls=_extract_texture_urls(response),
             raw=_json_object(response),
         )
 
-    async def submit_refine(self, preview_task_id: str) -> AssetTaskRef:
+    async def cancel_task(self, task: AssetTaskRef | str) -> None:
+        task_id = task.task_id if isinstance(task, AssetTaskRef) else task
+        if isinstance(task, AssetTaskRef) and task.poll_path:
+            poll_path = task.poll_path
+        else:
+            _, poll_path = self._task_paths.get(
+                task_id,
+                ("text_to_3d", f"/openapi/v2/text-to-3d/{task_id}"),
+            )
         api_key = self.key_resolver.resolve_required(self.config)
+        await self._request("DELETE", poll_path, api_key=api_key)
+
+    async def submit_refine(
+        self,
+        preview_task_id: str,
+        request: AssetGenerationRequest | None = None,
+    ) -> AssetTaskRef:
+        api_key = self.key_resolver.resolve_required(self.config)
+        payload: dict[str, Any] = {"mode": "refine", "preview_task_id": preview_task_id}
+        if request is not None:
+            payload.update(_allowed_options(request.provider_options))
         response = await self._request(
             "POST",
             "/openapi/v2/text-to-3d",
             api_key=api_key,
-            json={"mode": "refine", "preview_task_id": preview_task_id},
+            json=payload,
         )
         task_id = str(response.get("result") or response.get("id") or "")
         if not task_id:
             raise ProviderError("Meshy refine response did not include a task id.")
-        return AssetTaskRef(provider_id=self.config.provider_id, task_id=task_id)
+        poll_path = f"/openapi/v2/text-to-3d/{task_id}"
+        self._task_paths[task_id] = ("text_to_3d_refine", poll_path)
+        return AssetTaskRef(
+            provider_id=self.config.provider_id,
+            task_id=task_id,
+            task_type="text_to_3d_refine",
+            poll_path=poll_path,
+        )
+
+    async def _submit_task(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        task_type: str,
+    ) -> AssetTaskRef:
+        api_key = self.key_resolver.resolve_required(self.config)
+        response = await self._request("POST", path, api_key=api_key, json=payload)
+        task_id = str(response.get("result") or response.get("id") or "")
+        if not task_id:
+            raise ProviderError(f"Meshy {task_type} response did not include a task id.")
+        poll_path = f"{path}/{task_id}"
+        self._task_paths[task_id] = (task_type, poll_path)
+        return AssetTaskRef(
+            provider_id=self.config.provider_id,
+            task_id=task_id,
+            task_type=task_type,
+            poll_path=poll_path,
+            raw=_json_object(response),
+        )
 
     async def _request(
         self,
@@ -168,20 +274,58 @@ class MockMeshyProvider:
         task_id = f"mock_meshy_{abs(hash(request.prompt))}"
         return AssetTaskRef(provider_id=self.config.provider_id, task_id=task_id)
 
-    async def poll_task(self, task_id: str) -> AssetTaskResult:
+    async def submit_image_to_3d(self, request: AssetGenerationRequest) -> AssetTaskRef:
+        if not request.image_url:
+            raise ProviderError("Mock Image-to-3D requires image_url.")
         await asyncio.sleep(0)
+        return AssetTaskRef(
+            provider_id=self.config.provider_id,
+            task_id=f"mock_image_{abs(hash(request.image_url))}",
+            task_type="image_to_3d",
+        )
+
+    async def submit_retexture(self, request: AssetGenerationRequest) -> AssetTaskRef:
+        await asyncio.sleep(0)
+        return AssetTaskRef(
+            provider_id=self.config.provider_id,
+            task_id=f"mock_retexture_{abs(hash(request.source_task_id or request.model_url))}",
+            task_type="retexture",
+        )
+
+    async def submit_auto_rig(self, request: AssetGenerationRequest) -> AssetTaskRef:
+        await asyncio.sleep(0)
+        return AssetTaskRef(
+            provider_id=self.config.provider_id,
+            task_id=f"mock_rig_{abs(hash(request.source_task_id or request.model_url))}",
+            task_type="auto_rig",
+        )
+
+    async def poll_task(self, task: AssetTaskRef | str) -> AssetTaskResult:
+        await asyncio.sleep(0)
+        task_id = task.task_id if isinstance(task, AssetTaskRef) else task
+        task_type = task.task_type if isinstance(task, AssetTaskRef) else "text_to_3d"
         return AssetTaskResult(
             provider_id=self.config.provider_id,
             task_id=task_id,
             status=AssetTaskStatus.SUCCEEDED,
+            task_type=task_type,
+            progress=1.0,
             asset_urls=[f"mock://meshy/{task_id}.glb"],
         )
 
-    async def submit_refine(self, preview_task_id: str) -> AssetTaskRef:
+    async def cancel_task(self, task: AssetTaskRef | str) -> None:
+        await asyncio.sleep(0)
+
+    async def submit_refine(
+        self,
+        preview_task_id: str,
+        request: AssetGenerationRequest | None = None,
+    ) -> AssetTaskRef:
         await asyncio.sleep(0)
         return AssetTaskRef(
             provider_id=self.config.provider_id,
             task_id=f"{preview_task_id}_refined",
+            task_type="text_to_3d_refine",
         )
 
 
@@ -208,6 +352,42 @@ def _extract_asset_urls(response: dict[str, Any]) -> list[str]:
     if isinstance(response.get("asset_url"), str):
         return [str(response["asset_url"])]
     return []
+
+
+def _extract_texture_urls(response: dict[str, Any]) -> dict[str, str]:
+    value = response.get("texture_urls")
+    if isinstance(value, dict):
+        return {str(key): str(url) for key, url in value.items() if isinstance(url, str)}
+    result = response.get("result")
+    return _extract_texture_urls(result) if isinstance(result, dict) else {}
+
+
+def _progress(response: dict[str, Any]) -> float | None:
+    value = response.get("progress")
+    if not isinstance(value, int | float):
+        return None
+    return max(0.0, min(1.0, float(value) / 100.0))
+
+
+def _allowed_options(options: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "ai_model",
+        "topology",
+        "target_polycount",
+        "decimation_mode",
+        "should_texture",
+        "enable_pbr",
+        "hd_texture",
+        "texture_prompt",
+        "texture_image_url",
+        "text_style_prompt",
+        "image_style_url",
+        "enable_original_uv",
+        "remove_lighting",
+        "is_a_t_pose",
+        "rig_preset",
+    }
+    return {key: value for key, value in options.items() if key in allowed}
 
 
 def _json_object(value: dict[str, Any]) -> dict[str, Any]:

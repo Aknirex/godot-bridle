@@ -22,7 +22,9 @@ export async function waitForSidecar(
     onProgress(Date.now() - started);
     await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
   }
-  throw new Error(`Sidecar did not become ready within ${Math.ceil(timeoutMs / 1_000)} seconds.`);
+  throw new Error(
+    `Local service did not become ready within ${Math.ceil(timeoutMs / 1_000)} seconds.`,
+  );
 }
 
 export class RpcClient {

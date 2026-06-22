@@ -8,6 +8,8 @@ node_modules/
 dist/
 target/
 desktop/src-tauri/binaries/bridle-sidecar-*
+desktop/src-tauri/binaries/bridle-daemon-*
+nuitka-crash-report*.xml
 
 *.log
 *.tmp

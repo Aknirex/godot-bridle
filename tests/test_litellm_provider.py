@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 
 import pytest
@@ -8,6 +9,11 @@ from bridle.config.key_resolver import KeyResolver
 from bridle.domain.errors import AuthError
 from bridle.domain.providers import LlmChatRequest, ProviderConfig, ProviderKind
 from bridle.providers.llm_litellm import LiteLlmProvider
+
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("litellm") is None,
+    reason="LiteLLM compatibility extra is not installed",
+)
 
 
 async def test_litellm_provider_requires_key_before_network_call() -> None:

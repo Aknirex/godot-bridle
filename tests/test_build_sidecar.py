@@ -31,3 +31,9 @@ def test_windows_sidecar_target_has_exe_extension(tmp_path: Path) -> None:
 def test_sidecar_target_rejects_unsupported_platform(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unsupported sidecar target triple"):
         build_sidecar.sidecar_runtime_path(tmp_path, "aarch64-apple-darwin")
+
+
+def test_windows_daemon_target_has_exe_extension(tmp_path: Path) -> None:
+    assert build_sidecar.daemon_runtime_path(tmp_path, "x86_64-pc-windows-msvc") == (
+        tmp_path / "desktop/src-tauri/binaries/bridle-daemon-runtime/bridled.exe"
+    )

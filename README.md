@@ -18,7 +18,9 @@ Default CI and local tests exclude real provider calls. Opt-in smoke tests requi
 `EMBEDDING_API_BASE` and `EMBEDDING_MODEL` environment variables; see
 [`docs/10-validation-debt-and-next-development-plan.md`](docs/10-validation-debt-and-next-development-plan.md).
 
-The desktop shell will talk to the Python core through the stdio JSON-RPC sidecar:
+The desktop now starts a small Rust `bridled` service and renders immediately. Python is launched
+only when an AI, knowledge, or asset workflow needs it, and is reaped after 60 idle seconds. The
+stdio JSON Lines adapter remains available for tests and CLI clients:
 
 ```powershell
 uv run bridle sidecar
@@ -37,3 +39,7 @@ The final release gate is recorded in
   Meshy integration, GLB inspection, and Godot CLI import checks.
 - P1: local RAG knowledge base for Godot project context, generated asset records,
   import logs, and Bridle docs. See `docs/08-rag-vector-knowledge-base.md`.
+
+Implementation claims and remaining v0.1 gaps are tracked in
+[`docs/12-v0.1-commitment-ledger.md`](docs/12-v0.1-commitment-ledger.md). A capability enum,
+mock path, or UI shell is not considered complete without implementation and validation evidence.

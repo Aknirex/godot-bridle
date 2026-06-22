@@ -1,6 +1,6 @@
 # godot-bridle 实时状态
 
-> 最后更新：2026-06-21 12:41 (UTC+8)
+> 最后更新：2026-06-22 (UTC+8)
 > 版本：v0.1.0a0
 > 分支：当前工作树
 
@@ -8,23 +8,33 @@
 
 | 检查项 | 结果 | 详情 |
 |--------|------|------|
-| Python 测试 | ✅ 100 passed, 1 skipped, 3 deselected | `uv run pytest -q -m "not external_api"` |
+| Python 测试 | ✅ base/assets 114 passed, 15 skipped；LiteLLM extra 11 passed, 2 skipped | 默认包与可选兼容包分别执行 |
 | Ruff lint | ✅ All checks passed | `uv run ruff check bridle tests` |
 | CLI health | ✅ ok | `uv run bridle health` → `{"status":"ok"}` |
-| TypeScript 测试 | ✅ 7 passed (3 files) | `npx vitest run` |
+| TypeScript 测试 | ✅ 9 passed (3 files) | `npx vitest run` |
 | TypeScript 编译 | ✅ 零错误 | `npx tsc --noEmit` |
 | Vite 生产构建 | ✅ 193ms | `npm run build` |
-| Rust check | ⏳ 未在 Windows 执行 | CI 由 ubuntu-latest 覆盖 |
+| Rust build/test | ✅ Windows release build + test | `cargo build --release --bin bridled`; `cargo test --bin bridled` |
+| Nuitka Worker | ✅ 276ms ready，105.8MB / 48 files | 含 xatlas/numpy 的 standalone 实际构建与 health smoke |
+| Tauri release | ✅ executable；⚠️ MSI 未验 | `npx tauri build --no-bundle`；WiX 下载截断 |
 
 ## 模块实现状态
 
-### Alpha 核心 (WP0-WP8) — 全部完成
+### Alpha 核心 (WP0-WP8) — 代码闭环，真实验收未完成
 
-代码实现 + 离线测试覆盖到位，参见 `docs/07-v0.1-alpha-implementation-plan.md`。
+Alpha 缩减范围内的代码与离线测试基本到位，但安装包、真实 Provider、冷启动和真实 Godot
+导入尚未完成验证，不能视为发布完成。
 
-### RAG 知识库 (K1-K6) — 全部完成
+### RAG 知识库 (K1-K6) — 代码实现，真实服务验证未完成
 
 代码实现 + mock 测试覆盖到位，真实服务验证归入 V3。参见 `docs/08-rag-vector-knowledge-base.md`。
+
+### 原始 v0.1 MVP 承诺 — 存在重要缺口
+
+原始需求中的流式 LLM、语义缓存/LRU、Meshy 图生 3D、Retexture、Auto-Rig 和 PBR
+映射、缺失/反向法线写回和 xatlas UV 展开已实现并有离线证据，但真实 Provider/Godot
+验收尚未完成。逐项状态和验收证据见
+`docs/12-v0.1-commitment-ledger.md`。枚举、页面骨架或 mock 路径不得再记为功能完成。
 
 ## 验证债务
 

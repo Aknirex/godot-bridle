@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-bridle.dev/protocol/v1.schema.json",
+  "title": "Godot Bridle local JSON-RPC protocol",
+  "type": "object",
+  "required": ["jsonrpc", "method"],
+  "properties": {
+    "jsonrpc": { "const": "2.0" },
+    "id": { "type": ["integer", "string", "null"] },
+    "method": {
+      "enum": [
+        "system.health",
+        "system.capabilities",
+        "projects.open",
+        "providers.list",
+        "providers.save",
+        "providers.test",
+        "providers.stream_chat",
+        "workflows.submit",
+        "jobs.get",
+        "jobs.cancel",
+        "jobs.subscribe",
+        "knowledge.index",
+        "knowledge.status",
+        "knowledge.query",
+        "knowledge.ask"
+      ]
+    },
+    "params": { "type": "object" }
+  },
+  "$defs": {
+    "workflowRequest": {
+      "type": "object",
+      "required": ["workflow_id", "project_path", "prompt", "input_type", "provider_id"],
+      "properties": {
+        "workflow_id": { "const": "character_gen" },
+        "project_path": { "type": "string", "minLength": 1 },
+        "prompt": { "type": "string", "minLength": 1 },
+        "input_type": { "enum": ["text", "image", "retexture", "auto_rig"] },
+        "provider_id": { "type": "string", "minLength": 1 },
+        "image_url": { "type": ["string", "null"] },
+        "source_task_id": { "type": ["string", "null"] },
+        "model_url": { "type": ["string", "null"] },
+        "required_capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "enable_pbr": { "type": "boolean" },
+        "texture_prompt": { "type": ["string", "null"] },
+        "texture_image_url": { "type": ["string", "null"] },
+        "auto_rig": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "task": {
+      "type": "object",
+      "required": ["provider_id", "task_id", "status", "task_type"],
+      "properties": {
+        "provider_id": { "type": "string" },
+        "task_id": { "type": "string" },
+        "task_type": { "type": "string" },
+        "status": {
+          "enum": ["submitted", "running", "succeeded", "failed", "cancelled", "unknown"]
+        },
+        "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "artifact_urls": { "type": "array", "items": { "type": "string" } },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "additionalProperties": true
+    },
+    "error": {
+      "type": ["object", "null"],
+      "properties": {
+        "code": { "type": "string" },
+        "safe_details": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      },
+      "required": ["code", "safe_details"],
+      "additionalProperties": false
+    },
+    "assetManifest": {
+      "type": "object",
+      "required": [
+        "asset_id", "source_path", "sha256", "inspection", "repairs",
+        "materials", "rigging", "provenance"
+      ],
+      "properties": {
+        "asset_id": { "type": "string" },
+        "source_path": { "type": "string" },
+        "normalized_path": { "type": ["string", "null"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "inspection": { "type": "object" },
+        "repairs": { "type": "array", "items": { "type": "object" } },
+        "materials": { "type": "array", "items": { "type": "object" } },
+        "rigging": { "type": "object" },
+        "provenance": { "type": "object" },
+        "godot_validation": { "type": ["object", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

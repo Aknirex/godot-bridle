@@ -10,17 +10,20 @@ from bridle.config.key_resolver import KeyResolver
 from bridle.config.secrets import contains_forbidden_secret_field
 from bridle.domain.assets import GodotImportResult
 from bridle.domain.capabilities import ProviderCapability
-from bridle.domain.errors import ConfigError, ProviderCapabilityError
+from bridle.domain.errors import AuthError, ConfigError, ProviderCapabilityError
 from bridle.domain.events import JsonValue
 from bridle.domain.jobs import JobRef, JobStatus
 from bridle.domain.projects import ProjectSummary
 from bridle.domain.providers import (
+    LlmChatRequest,
+    LlmStreamEvent,
     ProviderConfig,
     ProviderHealth,
     ProviderHealthStatus,
     ProviderKind,
 )
 from bridle.godot.project import detect_project
+from bridle.harness.cache import ExactCache, SemanticCache
 from bridle.harness.character_workflow import (
     CharacterGenerationRequest,
     CharacterGenerationWorkflow,
@@ -33,7 +36,6 @@ from bridle.knowledge.chroma_store import ChromaVectorStore
 from bridle.knowledge.documents import KnowledgeAnswer, KnowledgeIndexStatus, RetrievalHit
 from bridle.knowledge.service import ProjectKnowledgeService
 from bridle.providers.asset_meshy import MeshyProvider, MockMeshyProvider
-from bridle.providers.embedding_litellm import LiteLlmEmbeddingProvider
 from bridle.providers.resolver import ProviderResolver
 
 
@@ -58,6 +60,12 @@ class BridleAppService:
             )
         )
         self.key_resolver = key_resolver or KeyResolver()
+        self._llm_cache = ExactCache(
+            store.db_path.parent / "response-cache.sqlite3",
+            max_entries=1_000,
+        )
+        self._semantic_caches: dict[str, SemanticCache] = {}
+        self._llm_providers: dict[str, object] = {}
         self._knowledge_services: dict[Path, ProjectKnowledgeService] = {}
         self._knowledge_lock = asyncio.Lock()
 
@@ -74,9 +82,18 @@ class BridleAppService:
 
     async def stop(self) -> None:
         await self.orchestrator.stop()
+        for provider in self._llm_providers.values():
+            close = getattr(provider, "close", None)
+            if close is not None:
+                await close()
+        self._llm_providers.clear()
         for knowledge in self._knowledge_services.values():
             knowledge.catalog.close()
         self._knowledge_services.clear()
+        self._llm_cache.close()
+        for cache in self._semantic_caches.values():
+            cache.close()
+        self._semantic_caches.clear()
         self.store.close()
 
     async def health(self) -> dict[str, str]:
@@ -105,6 +122,11 @@ class BridleAppService:
             raise ConfigError("Invalid provider configuration.") from error
         self.store.save_provider_config(config)
         self.providers = _merge_provider_configs(self.providers, [config])
+        stale = self._llm_providers.pop(config.provider_id, None)
+        if stale is not None:
+            close = getattr(stale, "close", None)
+            if close is not None:
+                await close()
         for knowledge in self._knowledge_services.values():
             knowledge.catalog.close()
         self._knowledge_services.clear()
@@ -113,11 +135,9 @@ class BridleAppService:
     async def test_provider(self, provider_id: str) -> ProviderHealth:
         provider = self._provider_by_id(provider_id)
         if ProviderCapability.EMBEDDING_GENERATE in provider.capabilities:
-            return await LiteLlmEmbeddingProvider(provider, self.key_resolver).test_connection()
+            return await self._embedding_provider(provider).test_connection()
         if provider.kind == ProviderKind.LLM:
-            from bridle.providers.llm_litellm import LiteLlmProvider
-
-            return await LiteLlmProvider(provider, self.key_resolver).test_connection()
+            return await self._llm_provider(provider).test_connection()
         if provider.kind == ProviderKind.ASSET and provider.backend == "mock_meshy":
             return await MockMeshyProvider(provider).test_connection()
         if provider.kind == ProviderKind.ASSET and provider.backend == "meshy":
@@ -127,6 +147,22 @@ class BridleAppService:
             status=ProviderHealthStatus.UNKNOWN,
             safe_details=f"No health adapter for backend {provider.backend!r}.",
         )
+
+    async def stream_llm_chat(
+        self, provider_id: str, params: dict
+    ):
+        config = self._provider_by_id(provider_id)
+        if ProviderCapability.LLM_STREAM not in config.capabilities:
+            raise ProviderCapabilityError(
+                f"Provider {provider_id!r} does not support llm.stream."
+            )
+        try:
+            request = LlmChatRequest.model_validate(params)
+        except ValidationError as error:
+            raise ConfigError("Invalid LLM chat request.") from error
+        provider = self._llm_provider(config)
+        async for event in provider.stream_chat(request):
+            yield LlmStreamEvent.model_validate(event)
 
     async def submit_workflow(self, params: dict) -> JobRef:
         workflow_id = str(params.get("workflow_id", "mock.sleep"))
@@ -146,10 +182,8 @@ class BridleAppService:
                 )
             llm_provider = None
             if request.enhance_prompt:
-                from bridle.providers.llm_litellm import LiteLlmProvider
-
                 llm_config = self._provider_by_id("deepseek")
-                llm_provider = LiteLlmProvider(llm_config, self.key_resolver)
+                llm_provider = self._llm_provider(llm_config)
             workflow = CharacterGenerationWorkflow(
                 request,
                 provider,
@@ -276,15 +310,13 @@ class BridleAppService:
                 .resolve([ProviderCapability.EMBEDDING_GENERATE])
                 .provider_for(ProviderCapability.EMBEDDING_GENERATE)
             )
-            embeddings = LiteLlmEmbeddingProvider(embedding_config, self.key_resolver)
+            embeddings = self._embedding_provider(embedding_config)
             llm_config = (
                 ProviderResolver(self.providers)
                 .resolve([ProviderCapability.LLM_CHAT])
                 .provider_for(ProviderCapability.LLM_CHAT)
             )
-            from bridle.providers.llm_litellm import LiteLlmProvider
-
-            answer_provider = LiteLlmProvider(llm_config, self.key_resolver)
+            answer_provider = self._llm_provider(llm_config)
             try:
                 vector_store = await asyncio.to_thread(
                     ChromaVectorStore,
@@ -313,14 +345,86 @@ class BridleAppService:
                 return provider
         raise ProviderCapabilityError(f"Provider {provider_id!r} is not configured.")
 
+    def _llm_provider(self, config: ProviderConfig):
+        existing = self._llm_providers.get(config.provider_id)
+        if existing is not None:
+            return existing
+        provider = None
+        if config.backend == "anthropic":
+            from bridle.providers.llm_http import AnthropicProvider
+
+            provider = AnthropicProvider(config, self.key_resolver)
+        elif config.backend == "litellm":
+            from bridle.providers.llm_litellm import LiteLlmProvider
+
+            provider = LiteLlmProvider(config, self.key_resolver)
+        elif config.backend in {"openai", "openai_compatible"}:
+            from bridle.providers.llm_http import OpenAICompatibleProvider
+
+            provider = OpenAICompatibleProvider(config, self.key_resolver)
+        if provider is None:
+            raise ProviderCapabilityError(
+                f"Provider {config.provider_id!r} uses unsupported LLM backend "
+                f"{config.backend!r}."
+            )
+        from bridle.providers.cached import CachedLLMProvider
+
+        semantic_cache = self._semantic_cache_for(config)
+        cached = CachedLLMProvider(
+            provider,
+            self._llm_cache,
+            semantic_cache=semantic_cache,
+        )
+        self._llm_providers[config.provider_id] = cached
+        return cached
+
+    def _semantic_cache_for(self, config: ProviderConfig) -> SemanticCache | None:
+        existing = self._semantic_caches.get(config.provider_id)
+        if existing is not None:
+            return existing
+        try:
+            embedding_config = (
+                ProviderResolver(self.providers)
+                .resolve([ProviderCapability.EMBEDDING_GENERATE])
+                .provider_for(ProviderCapability.EMBEDDING_GENERATE)
+            )
+            # Semantic lookup is optional. Do not add a failing network request
+            # when the user configured only a chat provider.
+            self.key_resolver.resolve_required(embedding_config)
+        except (AuthError, ProviderCapabilityError):
+            return None
+        cache = SemanticCache(
+            self.store.db_path.parent / "semantic-response-cache.sqlite3",
+            self._embedding_provider(embedding_config),
+            threshold=0.94,
+            max_entries=500,
+        )
+        self._semantic_caches[config.provider_id] = cache
+        return cache
+
+    def _embedding_provider(self, config: ProviderConfig):
+        if config.backend == "litellm":
+            from bridle.providers.embedding_litellm import LiteLlmEmbeddingProvider
+
+            return LiteLlmEmbeddingProvider(config, self.key_resolver)
+        if config.backend in {"openai", "openai_compatible"}:
+            from bridle.providers.llm_http import OpenAICompatibleEmbeddingProvider
+
+            return OpenAICompatibleEmbeddingProvider(config, self.key_resolver)
+        raise ProviderCapabilityError(
+            f"Provider {config.provider_id!r} uses unsupported embedding backend "
+            f"{config.backend!r}."
+        )
+
 
 def default_provider_configs() -> list[ProviderConfig]:
     return [
         ProviderConfig(
             provider_id="deepseek",
             kind=ProviderKind.LLM,
-            backend="litellm",
-            model="deepseek/deepseek-chat",
+            backend="openai_compatible",
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
             api_key_env="DEEPSEEK_API_KEY",
             capabilities=[ProviderCapability.LLM_CHAT, ProviderCapability.LLM_STREAM],
             default_for=[ProviderCapability.LLM_CHAT, ProviderCapability.LLM_STREAM],
@@ -328,7 +432,7 @@ def default_provider_configs() -> list[ProviderConfig]:
         ProviderConfig(
             provider_id="openai_embedding",
             kind=ProviderKind.LLM,
-            backend="litellm",
+            backend="openai_compatible",
             model="text-embedding-3-small",
             api_key_env="OPENAI_API_KEY",
             capabilities=[ProviderCapability.EMBEDDING_GENERATE],
@@ -338,15 +442,30 @@ def default_provider_configs() -> list[ProviderConfig]:
             provider_id="meshy_mock",
             kind=ProviderKind.ASSET,
             backend="mock_meshy",
-            capabilities=[ProviderCapability.MODEL3D_TEXT_TO_3D],
-            default_for=[ProviderCapability.MODEL3D_TEXT_TO_3D],
+            capabilities=[
+                ProviderCapability.MODEL3D_TEXT_TO_3D,
+                ProviderCapability.MODEL3D_IMAGE_TO_3D,
+                ProviderCapability.TEXTURE_RETEXTURE,
+                ProviderCapability.RIGGING_AUTO_RIG,
+            ],
+            default_for=[
+                ProviderCapability.MODEL3D_TEXT_TO_3D,
+                ProviderCapability.MODEL3D_IMAGE_TO_3D,
+                ProviderCapability.TEXTURE_RETEXTURE,
+                ProviderCapability.RIGGING_AUTO_RIG,
+            ],
         ),
         ProviderConfig(
             provider_id="meshy",
             kind=ProviderKind.ASSET,
             backend="meshy",
             api_key_env="MESHY_API_KEY",
-            capabilities=[ProviderCapability.MODEL3D_TEXT_TO_3D],
+            capabilities=[
+                ProviderCapability.MODEL3D_TEXT_TO_3D,
+                ProviderCapability.MODEL3D_IMAGE_TO_3D,
+                ProviderCapability.TEXTURE_RETEXTURE,
+                ProviderCapability.RIGGING_AUTO_RIG,
+            ],
         ),
     ]
 

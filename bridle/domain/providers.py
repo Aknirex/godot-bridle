@@ -62,6 +62,28 @@ class LlmChatResponse(BaseModel):
     raw: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class LlmStreamEventType(StrEnum):
+    STARTED = "started"
+    DELTA = "delta"
+    COMPLETED = "completed"
+
+
+class LlmUsage(BaseModel):
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class LlmStreamEvent(BaseModel):
+    type: LlmStreamEventType
+    delta: str = ""
+    content: str = ""
+    model: str | None = None
+    finish_reason: str | None = None
+    usage: LlmUsage | None = None
+    latency_ms: int | None = None
+    time_to_first_token_ms: int | None = None
+
+
 class AssetTaskStatus(StrEnum):
     SUBMITTED = "submitted"
     RUNNING = "running"
@@ -72,7 +94,10 @@ class AssetTaskStatus(StrEnum):
 
 
 class AssetGenerationRequest(BaseModel):
-    prompt: str
+    prompt: str = ""
+    image_url: str | None = None
+    source_task_id: str | None = None
+    model_url: str | None = None
     output_format: str = "glb"
     provider_options: dict[str, JsonValue] = Field(default_factory=dict)
 
@@ -81,6 +106,8 @@ class AssetTaskRef(BaseModel):
     provider_id: str
     task_id: str
     status: AssetTaskStatus = AssetTaskStatus.SUBMITTED
+    task_type: str = "text_to_3d"
+    poll_path: str | None = None
     raw: dict[str, JsonValue] = Field(default_factory=dict)
 
 
@@ -88,5 +115,8 @@ class AssetTaskResult(BaseModel):
     provider_id: str
     task_id: str
     status: AssetTaskStatus
+    task_type: str = "text_to_3d"
+    progress: float | None = None
     asset_urls: list[str] = Field(default_factory=list)
+    texture_urls: dict[str, str] = Field(default_factory=dict)
     raw: dict[str, JsonValue] = Field(default_factory=dict)
