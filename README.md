@@ -1,9 +1,11 @@
 # godot-bridle
 
-Desktop-first AI harness for Godot asset generation workflows.
+Functional pipeline tooling for turning game asset requirements into provider requests and
+Godot-ready project assets.
 
-The repository contains the Python workflow core and an initial Tauri desktop shell. Design and
-delivery documents live in `docs/`.
+The repository contains the Python workflow core and an initial Tauri desktop shell. The product
+focus is the middle path between LLM/Agent planning, 3D asset-generation vendors, and Godot game
+projects. Design and delivery documents live in `docs/`.
 
 ## Development
 
@@ -15,8 +17,7 @@ uv run bridle health
 
 Default CI and local tests exclude real provider calls. Opt-in smoke tests require protected
 `DEEPSEEK_API_KEY`, `MESHY_API_KEY`, and `EMBEDDING_API_KEY` values plus the
-`EMBEDDING_API_BASE` and `EMBEDDING_MODEL` environment variables; see
-[`docs/10-validation-debt-and-next-development-plan.md`](docs/10-validation-debt-and-next-development-plan.md).
+`EMBEDDING_API_BASE` and `EMBEDDING_MODEL` environment variables.
 
 The desktop now starts a small Rust `bridled` service and renders immediately. Python is launched
 only when an AI, knowledge, or asset workflow needs it, and is reaped after 60 idle seconds. The
@@ -28,18 +29,14 @@ uv run bridle sidecar
 
 The Tauri v2 desktop MVP lives in `desktop/`. Development and packaging instructions are in
 [`docs/09-alpha-development-and-packaging.md`](docs/09-alpha-development-and-packaging.md).
-Deferred release validation and the ordered next-development plan are tracked in
-[`docs/10-validation-debt-and-next-development-plan.md`](docs/10-validation-debt-and-next-development-plan.md).
-The final release gate is recorded in
-[`docs/11-alpha-release-checklist.md`](docs/11-alpha-release-checklist.md).
+The current development direction is tracked in
+[`docs/12-functional-pipeline-reset-and-roadmap.md`](docs/12-functional-pipeline-reset-and-roadmap.md).
+Archived alpha release validation material is under `docs/archive/`.
 
 ## Roadmap
 
-- v0.1-alpha: desktop-first Godot asset generation workflow with BYOK, async jobs,
-  Meshy integration, GLB inspection, and Godot CLI import checks.
-- P1: local RAG knowledge base for Godot project context, generated asset records,
-  import logs, and Bridle docs. See `docs/08-rag-vector-knowledge-base.md`.
-
-Implementation claims and remaining v0.1 gaps are tracked in
-[`docs/12-v0.1-commitment-ledger.md`](docs/12-v0.1-commitment-ledger.md). A capability enum,
-mock path, or UI shell is not considered complete without implementation and validation evidence.
+- v0.1-alpha: keep the existing BYOK, async job, Meshy mock/real, GLB inspection,
+  Godot CLI import-check, and RAG foundations.
+- P0 reset: prove the functional pipeline from requirement document to structured asset
+  production request to provider execution to Godot import manifest.
+- P1: turn successful runs and failures into reusable workflow recipes and diagnostics.

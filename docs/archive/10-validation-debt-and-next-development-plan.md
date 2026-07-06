@@ -1,4 +1,7 @@
-# 验证债务与后续开发计划
+# 验证债务与后续开发计划（已归档）
+
+> 归档日期：2026-07-06  
+> 归档原因：该文档服务于上一阶段 alpha/UI/发布收口路线。当前开发主线已切换为功能管线验证，见 [`../12-functional-pipeline-reset-and-roadmap.md`](../12-functional-pipeline-reset-and-roadmap.md)。
 
 > **最后更新**：2026-06-21
 > **当前阶段**：D5（Alpha 验证债务清零）— D1-D4 代码实现完成
