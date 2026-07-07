@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -43,13 +42,3 @@ def _extract_asset_block(markdown: str) -> str:
         )
     return match.group("body").strip()
 
-
-def fake_llm_convert_freeform_to_asset_block(markdown: str, payload: list[dict[str, Any]]) -> str:
-    """Test helper that represents the LLM-assisted parser boundary.
-
-    Production code must replace this with a real LLM/Agent conversion step. The
-    deterministic parser still validates the resulting JSON schema.
-    """
-
-    del markdown
-    return "```bridle-assets\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```"

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from bridle.domain.capabilities import ProviderCapability
-from bridle.domain.production import AssetKind, AssetProductionRequest
+from bridle.domain.production import AssetProductionRequest
 from bridle.domain.providers import AssetGenerationRequest, ProviderConfig
 from bridle.providers.resolver import ProviderPlan, ProviderResolver
 
@@ -15,22 +14,6 @@ class AssetProductionPlan(BaseModel):
     provider_plan: ProviderPlan
     asset_provider: ProviderConfig
     generation_request: AssetGenerationRequest
-
-
-def required_capabilities_for_request(
-    request: AssetProductionRequest,
-) -> list[ProviderCapability]:
-    if request.required_capabilities:
-        return request.required_capabilities
-    if request.asset.kind == AssetKind.MODEL_3D:
-        return [ProviderCapability.MODEL3D_TEXT_TO_3D]
-    if request.asset.kind == AssetKind.TEXTURE:
-        return [ProviderCapability.TEXTURE_RETEXTURE]
-    if request.asset.kind == AssetKind.RIGGING:
-        return [ProviderCapability.RIGGING_AUTO_RIG]
-    if request.asset.kind == AssetKind.ANIMATION:
-        return [ProviderCapability.ANIMATION_TEXT_TO_MOTION]
-    raise ValueError(f"Unsupported asset kind: {request.asset.kind}")
 
 
 def to_asset_generation_request(
@@ -59,7 +42,7 @@ def plan_asset_production(
     *,
     explicit_provider_id: str | None = None,
 ) -> AssetProductionPlan:
-    required = required_capabilities_for_request(request)
+    required = request.required_capabilities
     provider_plan = resolver.resolve(required, explicit_provider_id=explicit_provider_id)
     primary_capability = required[0]
     return AssetProductionPlan(

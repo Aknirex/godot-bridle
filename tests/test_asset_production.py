@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,9 +17,21 @@ from bridle.providers.production_adapter import (
 from bridle.providers.resolver import ProviderResolver
 from bridle.requirements.parser import (
     RequirementParseError,
-    fake_llm_convert_freeform_to_asset_block,
     parse_asset_briefs,
 )
+
+
+def fake_llm_convert_freeform_to_asset_block(
+    markdown: str, payload: list[dict[str, Any]]
+) -> str:
+    """Test helper that represents the LLM-assisted parser boundary.
+
+    Production code must replace this with a real LLM/Agent conversion step. The
+    deterministic parser still validates the resulting JSON schema.
+    """
+
+    del markdown
+    return "```bridle-assets\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```"
 
 FIXTURES = Path(__file__).parent / "fixtures" / "requirements"
 
